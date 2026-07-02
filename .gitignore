@@ -1,2 +1,12 @@
 node_modules
 .env
+.env.local
+.env.*.local
+.claude
+CLAUDE.md
+.DS_Store
+npm-debug.log*
+dist
+build
+coverage
+*.log
