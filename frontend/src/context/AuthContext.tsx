@@ -13,6 +13,7 @@ interface AuthState {
     class: number
   }) => Promise<void>
   logout: () => void
+  refresh: () => Promise<void> // re-fetch the student (e.g. after a quiz updates counters)
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -67,8 +68,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStudent(null)
   }
 
+  const refresh = async () => {
+    const { student } = await api<{ student: Student }>('/api/auth/me')
+    setStudent(student)
+  }
+
   return (
-    <AuthContext.Provider value={{ student, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ student, loading, login, register, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   )
