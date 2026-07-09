@@ -57,3 +57,16 @@ export interface SubmitResponse {
   total_time_taken: number
   results: QuestionResult[]
 }
+
+export interface HistoryItem {
+  quiz_id: string
+  subject: string
+  completed_on: string
+  easy_questions: number
+  medium_questions: number
+  hard_questions: number
+  total_questions: number
+  correct_answers: number
+  accuracy: number
+  total_time_taken: number
+}

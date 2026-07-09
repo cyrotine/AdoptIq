@@ -1,5 +1,5 @@
 const supabase = require('../../db/supabase');
-const { validateGenerate, validateSubmit } = require('../utils/validate');
+const { validateGenerate, validateSubmit, validateQuizId } = require('../utils/validate');
 
 const ok = (status, body) => ({ status, body });
 const fail = (status, message) => ({ status, body: { error: message } });
@@ -162,4 +162,66 @@ const submit = async (studentId, input) => {
   });
 };
 
-module.exports = { generate, submit };
+const listHistory = async (studentId) => {
+  const { data, error } = await supabase
+    .from('quiz_history')
+    .select(
+      'quiz_id, subject, completed_on, easy_questions, medium_questions, hard_questions, correct_answers, total_time_taken',
+    )
+    .eq('student_id', studentId)
+    .order('completed_on', { ascending: false });
+  if (error) throw new Error(`quiz_history lookup failed: ${error.message}`);
+
+  const history = data.map((row) => {
+    const total_questions = row.easy_questions + row.medium_questions + row.hard_questions;
+    const accuracy = total_questions ? row.correct_answers / total_questions : 0;
+    return { ...row, total_questions, accuracy };
+  });
+
+  return ok(200, { history });
+};
+
+const getHistoryDetail = async (studentId, quizId) => {
+  const invalid = validateQuizId(quizId);
+  if (invalid) return fail(400, invalid);
+
+  const { data: quiz, error: quizError } = await supabase
+    .from('quiz_history')
+    .select(
+      'quiz_id, student_id, easy_questions, medium_questions, hard_questions, correct_answers, total_time_taken',
+    )
+    .eq('quiz_id', quizId)
+    .maybeSingle();
+  if (quizError) throw new Error(`quiz_history lookup failed: ${quizError.message}`);
+  if (!quiz || quiz.student_id !== studentId) return fail(404, 'quiz not found');
+
+  const { data: responses, error: responsesError } = await supabase
+    .from('quiz_responses')
+    .select('question_id, student_answer')
+    .eq('quiz_id', quizId);
+  if (responsesError) throw new Error(`quiz_responses lookup failed: ${responsesError.message}`);
+
+  const ids = responses.map((r) => r.question_id);
+  const { data: questions, error: questionsError } = await supabase
+    .from('questions')
+    .select('question_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation')
+    .in('question_id', ids);
+  if (questionsError) throw new Error(`question lookup failed: ${questionsError.message}`);
+
+  const byId = new Map(questions.map((q) => [q.question_id, q]));
+  const results = responses.map(({ question_id, student_answer }) => {
+    const question = byId.get(question_id);
+    return { ...question, student_answer, is_correct: student_answer === question.correct_answer };
+  });
+
+  return ok(200, {
+    quiz_id: quiz.quiz_id,
+    score: quiz.correct_answers,
+    total: quiz.easy_questions + quiz.medium_questions + quiz.hard_questions,
+    composition: { easy: quiz.easy_questions, medium: quiz.medium_questions, hard: quiz.hard_questions },
+    total_time_taken: quiz.total_time_taken,
+    results,
+  });
+};
+
+module.exports = { generate, submit, listHistory, getHistoryDetail };

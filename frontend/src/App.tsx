@@ -3,9 +3,10 @@ import { AuthProvider } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import Register from './pages/Register'
-import Home from './pages/Home'
+import Dashboard from './pages/Dashboard'
 import Quiz from './pages/Quiz'
 import Result from './pages/Result'
+import QuizReview from './pages/QuizReview'
 
 export default function App() {
   return (
@@ -15,9 +16,10 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route element={<ProtectedRoute />}>
-            <Route path="/" element={<Home />} />
+            <Route path="/" element={<Dashboard />} />
             <Route path="/quiz" element={<Quiz />} />
             <Route path="/result" element={<Result />} />
+            <Route path="/quiz/:quizId/review" element={<QuizReview />} />
           </Route>
         </Routes>
       </BrowserRouter>

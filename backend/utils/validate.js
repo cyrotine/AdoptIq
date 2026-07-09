@@ -34,6 +34,9 @@ const validateGenerate = ({ subject_id }) => {
   return null;
 };
 
+const validateQuizId = (quizId) =>
+  typeof quizId !== 'string' || !UUID_RE.test(quizId) ? 'quizId must be a valid uuid' : null;
+
 const validateSubmit = ({ subject_id, total_time_taken, responses }) => {
   const badSubject = validateGenerate({ subject_id });
   if (badSubject) return badSubject;
@@ -57,4 +60,10 @@ const validateSubmit = ({ subject_id, total_time_taken, responses }) => {
   return null;
 };
 
-module.exports = { validateRegistration, validateLogin, validateGenerate, validateSubmit };
+module.exports = {
+  validateRegistration,
+  validateLogin,
+  validateGenerate,
+  validateSubmit,
+  validateQuizId,
+};
