@@ -10,4 +10,12 @@ const list = async (req, res, next) => {
   }
 };
 
-module.exports = { list };
+const listChapters = async (req, res, next) => {
+  try {
+    send(res, await subjectService.listChapters(req.studentId, Number(req.params.subject_id)));
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { list, listChapters };

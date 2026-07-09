@@ -28,9 +28,28 @@ const validateLogin = ({ identifier, password }) => {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ANSWERS = ['A', 'B', 'C', 'D'];
 
-const validateGenerate = ({ subject_id }) => {
-  if (!Number.isInteger(subject_id) || subject_id < 1)
-    return 'subject_id must be a positive integer';
+const validateSubjectId = (subject_id) =>
+  !Number.isInteger(subject_id) || subject_id < 1 ? 'subject_id must be a positive integer' : null;
+
+const validateGenerate = ({ subject_id, chapter_ids, easy, medium, hard }) => {
+  const badSubject = validateSubjectId(subject_id);
+  if (badSubject) return badSubject;
+
+  if (!Array.isArray(chapter_ids) || chapter_ids.length < 1 || chapter_ids.length > 50)
+    return 'chapter_ids must be an array of 1-50 items';
+  const seen = new Set();
+  for (const id of chapter_ids) {
+    if (!Number.isInteger(id) || id < 1) return 'each chapter_id must be a positive integer';
+    if (seen.has(id)) return 'duplicate chapter_id';
+    seen.add(id);
+  }
+
+  for (const [label, count] of [['easy', easy], ['medium', medium], ['hard', hard]]) {
+    if (!Number.isInteger(count) || count < 0 || count > 30)
+      return `${label} must be an integer between 0 and 30`;
+  }
+  if (easy + medium + hard !== 30) return 'easy + medium + hard must equal 30';
+
   return null;
 };
 
@@ -38,7 +57,7 @@ const validateQuizId = (quizId) =>
   typeof quizId !== 'string' || !UUID_RE.test(quizId) ? 'quizId must be a valid uuid' : null;
 
 const validateSubmit = ({ subject_id, total_time_taken, responses }) => {
-  const badSubject = validateGenerate({ subject_id });
+  const badSubject = validateSubjectId(subject_id);
   if (badSubject) return badSubject;
   if (!Number.isInteger(total_time_taken) || total_time_taken < 0)
     return 'total_time_taken must be a non-negative integer (seconds)';
@@ -63,6 +82,7 @@ const validateSubmit = ({ subject_id, total_time_taken, responses }) => {
 module.exports = {
   validateRegistration,
   validateLogin,
+  validateSubjectId,
   validateGenerate,
   validateSubmit,
   validateQuizId,

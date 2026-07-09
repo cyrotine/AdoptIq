@@ -10,3 +10,5 @@ dist
 build
 coverage
 *.log
+.specs
+

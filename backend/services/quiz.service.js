@@ -1,13 +1,14 @@
 const supabase = require('../../db/supabase');
+const { getChapters } = require('./subject.service');
 const { validateGenerate, validateSubmit, validateQuizId } = require('../utils/validate');
 
 const ok = (status, body) => ({ status, body });
 const fail = (status, message) => ({ status, body: { error: message } });
 
-// MVP composition: fixed mix, shortfall filled from whatever has surplus.
-// Phase 4 (RL/mastery) replaces only this selection step.
+// Composition mix is now client-supplied (Spec 05); shortfall in a difficulty
+// bucket is filled from whatever has surplus. Phase 4 (RL/mastery) replaces
+// only this selection step.
 const QUIZ_SIZE = 30;
-const MIX = [['Easy', 12], ['Medium', 12], ['Hard', 6]];
 const FILL_ORDER = ['Medium', 'Easy', 'Hard'];
 
 // In-place Fisher–Yates.
@@ -17,6 +18,31 @@ const shuffle = (arr) => {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+};
+
+// Take up to `n` questions from `pool`, spread as evenly as possible across
+// chapters: group by chapter_id, shuffle each group, then pop round-robin so no
+// chapter dominates. A chapter that empties simply drops out and its share goes
+// to the others. Mutates `pool` (removes the taken questions).
+const takeRoundRobin = (pool, n) => {
+  const groups = new Map();
+  for (const q of pool) {
+    if (!groups.has(q.chapter_id)) groups.set(q.chapter_id, []);
+    groups.get(q.chapter_id).push(q);
+  }
+  groups.forEach(shuffle);
+
+  const taken = [];
+  const queues = [...groups.values()];
+  while (taken.length < n && queues.some((g) => g.length)) {
+    for (const g of queues) {
+      if (taken.length >= n) break;
+      if (g.length) taken.push(g.pop());
+    }
+  }
+  const takenSet = new Set(taken);
+  for (let i = pool.length - 1; i >= 0; i--) if (takenSet.has(pool[i])) pool.splice(i, 1);
+  return taken;
 };
 
 const getSubject = async (subjectId) => {
@@ -49,40 +75,50 @@ const generate = async (studentId, input) => {
   const student = await getStudent(studentId, 'class');
   if (!student) return fail(401, 'invalid token');
 
-  // Candidates for subject + class. correct_answer/explanation never selected.
+  // Chapter ownership: every requested chapter must belong to this subject+class.
+  const validChapters = await getChapters(subject.subject_id, student.class);
+  const validIds = new Set(validChapters.map((c) => c.chapter_id));
+  if (!input.chapter_ids.every((id) => validIds.has(id))) {
+    return fail(400, 'invalid chapter');
+  }
+
+  // Candidates for the selected chapters. correct_answer/explanation never
+  // selected. chapter_id (via topics) is kept only for balancing, then stripped.
   const { data: candidates, error } = await supabase
     .from('questions')
     .select(
-      'question_id, question_text, option_a, option_b, option_c, option_d, difficulty_label, estimated_time, topics!inner(chapters!inner())',
+      'question_id, question_text, option_a, option_b, option_c, option_d, difficulty_label, estimated_time, topics!inner(chapter_id)',
     )
-    .eq('topics.chapters.subject_id', subject.subject_id)
-    .eq('topics.chapters.class', student.class);
+    .in('topics.chapter_id', input.chapter_ids);
   if (error) throw new Error(`question lookup failed: ${error.message}`);
 
   if (!candidates.length) {
-    return fail(400, 'no questions available for this subject yet');
+    return fail(400, 'no questions available for this selection yet');
   }
 
   const buckets = { Easy: [], Medium: [], Hard: [] };
   for (const { topics, ...question } of candidates) {
-    buckets[question.difficulty_label].push(question);
+    buckets[question.difficulty_label].push({ ...question, chapter_id: topics.chapter_id });
   }
-  Object.values(buckets).forEach(shuffle);
 
+  const mix = [['Easy', input.easy], ['Medium', input.medium], ['Hard', input.hard]];
   const picked = [];
-  for (const [label, want] of MIX) picked.push(...buckets[label].splice(0, want));
+  for (const [label, want] of mix) picked.push(...takeRoundRobin(buckets[label], want));
   for (const label of FILL_ORDER) {
     const shortfall = QUIZ_SIZE - picked.length;
     if (!shortfall) break;
-    picked.push(...buckets[label].splice(0, shortfall));
+    picked.push(...takeRoundRobin(buckets[label], shortfall));
   }
   shuffle(picked);
 
   const composition = { easy: 0, medium: 0, hard: 0 };
   for (const q of picked) composition[q.difficulty_label.toLowerCase()]++;
 
+  // Strip the internal chapter_id before it reaches the client.
+  const questions = picked.map(({ chapter_id, ...q }) => q);
+
   // Stateless: nothing is written until submit; abandoned quizzes leave no rows.
-  return ok(200, { subject: subject.subject_name, composition, questions: picked });
+  return ok(200, { subject: subject.subject_name, composition, questions });
 };
 
 const submit = async (studentId, input) => {
@@ -224,4 +260,4 @@ const getHistoryDetail = async (studentId, quizId) => {
   });
 };
 
-module.exports = { generate, submit, listHistory, getHistoryDetail };
+module.exports = { generate, submit, listHistory, getHistoryDetail, takeRoundRobin };

@@ -5,6 +5,19 @@ export interface Subject {
   subject_name: string
 }
 
+export interface Chapter {
+  chapter_id: number
+  chapter_name: string
+}
+
+export interface GenerateRequest {
+  subject_id: number
+  chapter_ids: number[]
+  easy: number
+  medium: number
+  hard: number
+}
+
 export type Answer = 'A' | 'B' | 'C' | 'D'
 
 export interface QuizQuestion {

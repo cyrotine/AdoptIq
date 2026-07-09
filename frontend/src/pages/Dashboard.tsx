@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
-import type { GenerateResponse, HistoryItem, Subject } from '../lib/quiz'
+import type { Chapter, GenerateResponse, HistoryItem, Subject } from '../lib/quiz'
 
 const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+
+const DEFAULT_SPLIT = { easy: 12, medium: 12, hard: 6 }
 
 export default function Dashboard() {
   const { student, logout } = useAuth()
@@ -14,6 +16,11 @@ export default function Dashboard() {
   const [selected, setSelected] = useState<number | null>(null)
   const [error, setError] = useState('')
   const [generating, setGenerating] = useState(false)
+
+  const [chapters, setChapters] = useState<Chapter[] | null>(null)
+  const [chaptersError, setChaptersError] = useState('')
+  const [checked, setChecked] = useState<Set<number>>(new Set())
+  const [split, setSplit] = useState(DEFAULT_SPLIT)
 
   const [history, setHistory] = useState<HistoryItem[] | null>(null)
   const [historyError, setHistoryError] = useState('')
@@ -30,14 +37,50 @@ export default function Dashboard() {
       .catch((err: Error) => setHistoryError(err.message))
   }, [])
 
+  const selectSubject = (subjectId: number) => {
+    setSelected(subjectId)
+    setChapters(null)
+    setChaptersError('')
+    setChecked(new Set())
+    setSplit(DEFAULT_SPLIT)
+    api<{ chapters: Chapter[] }>(`/api/subjects/${subjectId}/chapters`)
+      .then(({ chapters }) => {
+        setChapters(chapters)
+        setChecked(new Set(chapters.map((c) => c.chapter_id))) // default: all ticked
+      })
+      .catch((err: Error) => setChaptersError(err.message))
+  }
+
+  const toggleChapter = (chapterId: number) => {
+    setChecked((prev) => {
+      const next = new Set(prev)
+      next.has(chapterId) ? next.delete(chapterId) : next.add(chapterId)
+      return next
+    })
+  }
+
+  const setCount = (key: 'easy' | 'medium' | 'hard', value: number) => {
+    const clamped = Number.isFinite(value) ? Math.max(0, Math.min(30, Math.floor(value))) : 0
+    setSplit((prev) => ({ ...prev, [key]: clamped }))
+  }
+
+  const total = split.easy + split.medium + split.hard
+  const canGenerate = selected !== null && checked.size > 0 && total === 30 && !generating
+
   const generate = async () => {
-    if (selected === null) return
+    if (!canGenerate || selected === null) return
     setGenerating(true)
     setError('')
     try {
       const quiz = await api<GenerateResponse>('/api/quiz/generate', {
         method: 'POST',
-        body: JSON.stringify({ subject_id: selected }),
+        body: JSON.stringify({
+          subject_id: selected,
+          chapter_ids: [...checked],
+          easy: split.easy,
+          medium: split.medium,
+          hard: split.hard,
+        }),
       })
       navigate('/quiz', { state: { quiz, subjectId: selected } })
     } catch (err) {
@@ -105,7 +148,7 @@ export default function Dashboard() {
                 {subjects.map((s) => (
                   <button
                     key={s.subject_id}
-                    onClick={() => setSelected(s.subject_id)}
+                    onClick={() => selectSubject(s.subject_id)}
                     className={`rounded-lg border p-4 text-left font-medium shadow-sm transition ${
                       selected === s.subject_id
                         ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
@@ -116,13 +159,82 @@ export default function Dashboard() {
                   </button>
                 ))}
               </div>
-              <button
-                onClick={generate}
-                disabled={selected === null || generating}
-                className="mt-6 w-full rounded-lg bg-indigo-600 py-3 font-semibold text-white shadow hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {generating ? 'Generating…' : 'Generate Test'}
-              </button>
+
+              {selected !== null && (
+                <div className="mt-6">
+                  <h3 className="text-sm font-semibold text-gray-900">Chapters</h3>
+
+                  {chaptersError && (
+                    <p className="mt-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                      {chaptersError}
+                    </p>
+                  )}
+                  {chapters === null && !chaptersError && (
+                    <p className="mt-2 text-sm text-gray-500">Loading chapters…</p>
+                  )}
+                  {chapters?.length === 0 && (
+                    <p className="mt-2 text-sm text-gray-500">No chapters for this subject yet.</p>
+                  )}
+
+                  {chapters && chapters.length > 0 && (
+                    <>
+                      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {chapters.map((c) => (
+                          <label
+                            key={c.chapter_id}
+                            className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked.has(c.chapter_id)}
+                              onChange={() => toggleChapter(c.chapter_id)}
+                              className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+                            />
+                            {c.chapter_name}
+                          </label>
+                        ))}
+                      </div>
+                      {checked.size === 0 && (
+                        <p className="mt-2 text-sm text-amber-600">Select at least one chapter.</p>
+                      )}
+
+                      <h3 className="mt-6 text-sm font-semibold text-gray-900">
+                        Difficulty (30 questions total)
+                      </h3>
+                      <div className="mt-3 flex flex-wrap items-end gap-4 overflow-x-auto">
+                        {(['easy', 'medium', 'hard'] as const).map((key) => (
+                          <label key={key} className="flex flex-col text-sm text-gray-600">
+                            <span className="capitalize">{key}</span>
+                            <input
+                              type="number"
+                              min={0}
+                              max={30}
+                              value={split[key]}
+                              onChange={(e) => setCount(key, e.target.valueAsNumber)}
+                              className="mt-1 w-20 rounded-lg border border-gray-300 px-3 py-2 text-gray-900"
+                            />
+                          </label>
+                        ))}
+                        <p
+                          className={`text-sm font-medium ${
+                            total === 30 ? 'text-gray-500' : 'text-amber-600'
+                          }`}
+                        >
+                          Total: {total}/30
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={generate}
+                        disabled={!canGenerate}
+                        className="mt-6 w-full rounded-lg bg-indigo-600 py-3 font-semibold text-white shadow hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {generating ? 'Generating…' : 'Generate Test'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </>
           )}
         </section>
