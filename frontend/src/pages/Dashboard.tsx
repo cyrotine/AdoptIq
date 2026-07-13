@@ -8,6 +8,13 @@ const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}m ${seconds 
 
 const DEFAULT_SPLIT = { easy: 12, medium: 12, hard: 6 }
 
+// Difficulty sliders: label + colored thumb (green/amber/red) matching DifficultyBadge.
+const SLIDERS = [
+  { key: 'easy', label: 'Easy', accent: 'accent-green-500', dot: 'bg-green-500' },
+  { key: 'medium', label: 'Medium', accent: 'accent-amber-500', dot: 'bg-amber-500' },
+  { key: 'hard', label: 'Hard', accent: 'accent-red-500', dot: 'bg-red-500' },
+] as const
+
 export default function Dashboard() {
   const { student, logout } = useAuth()
   const navigate = useNavigate()
@@ -60,11 +67,16 @@ export default function Dashboard() {
   }
 
   const setCount = (key: 'easy' | 'medium' | 'hard', value: number) => {
-    const clamped = Number.isFinite(value) ? Math.max(0, Math.min(30, Math.floor(value))) : 0
-    setSplit((prev) => ({ ...prev, [key]: clamped }))
+    setSplit((prev) => {
+      const others = 30 - (prev.easy + prev.medium + prev.hard) + prev[key]
+      // Cap so easy + medium + hard can never exceed 30; user fills up to 30.
+      const clamped = Number.isFinite(value) ? Math.max(0, Math.min(others, Math.round(value))) : 0
+      return { ...prev, [key]: clamped }
+    })
   }
 
   const total = split.easy + split.medium + split.hard
+  const remaining = 30 - total
   const canGenerate = selected !== null && checked.size > 0 && total === 30 && !generating
 
   const generate = async () => {
@@ -162,7 +174,21 @@ export default function Dashboard() {
 
               {selected !== null && (
                 <div className="mt-6">
-                  <h3 className="text-sm font-semibold text-gray-900">Chapters</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-gray-900">Chapters</h3>
+                    {chapters && chapters.length > 0 && (
+                      <button
+                        onClick={() =>
+                          setChecked(
+                            checked.size > 0 ? new Set() : new Set(chapters.map((c) => c.chapter_id)),
+                          )
+                        }
+                        className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                      >
+                        {checked.size > 0 ? 'Clear all' : 'Select all'}
+                      </button>
+                    )}
+                  </div>
 
                   {chaptersError && (
                     <p className="mt-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
@@ -198,30 +224,36 @@ export default function Dashboard() {
                         <p className="mt-2 text-sm text-amber-600">Select at least one chapter.</p>
                       )}
 
-                      <h3 className="mt-6 text-sm font-semibold text-gray-900">
-                        Difficulty (30 questions total)
-                      </h3>
-                      <div className="mt-3 flex flex-wrap items-end gap-4 overflow-x-auto">
-                        {(['easy', 'medium', 'hard'] as const).map((key) => (
-                          <label key={key} className="flex flex-col text-sm text-gray-600">
-                            <span className="capitalize">{key}</span>
-                            <input
-                              type="number"
-                              min={0}
-                              max={30}
-                              value={split[key]}
-                              onChange={(e) => setCount(key, e.target.valueAsNumber)}
-                              className="mt-1 w-20 rounded-lg border border-gray-300 px-3 py-2 text-gray-900"
-                            />
-                          </label>
-                        ))}
-                        <p
+                      <div className="mt-6 flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-gray-900">Difficulty</h3>
+                        <span
                           className={`text-sm font-medium ${
                             total === 30 ? 'text-gray-500' : 'text-amber-600'
                           }`}
                         >
-                          Total: {total}/30
-                        </p>
+                          {total === 30 ? '30 / 30 questions' : `${remaining} left to assign`}
+                        </span>
+                      </div>
+                      <div className="mt-3 space-y-4">
+                        {SLIDERS.map(({ key, label, accent, dot }) => (
+                          <div key={key}>
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="flex items-center gap-2 text-gray-700">
+                                <span className={`h-2.5 w-2.5 rounded-full ${dot}`} />
+                                {label}
+                              </span>
+                              <span className="font-semibold text-gray-900">{split[key]}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={30}
+                              value={split[key]}
+                              onChange={(e) => setCount(key, e.target.valueAsNumber)}
+                              className={`mt-2 w-full cursor-pointer ${accent}`}
+                            />
+                          </div>
+                        ))}
                       </div>
 
                       <button

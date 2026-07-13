@@ -20,6 +20,8 @@ export interface GenerateRequest {
 
 export type Answer = 'A' | 'B' | 'C' | 'D'
 
+export type Difficulty = 'Easy' | 'Medium' | 'Hard'
+
 export interface QuizQuestion {
   question_id: string
   question_text: string
@@ -27,7 +29,9 @@ export interface QuizQuestion {
   option_b: string
   option_c: string
   option_d: string
-  difficulty_label: 'Easy' | 'Medium' | 'Hard'
+  difficulty_label: Difficulty
+  topic_name: string
+  chapter_name: string
   estimated_time: number | null
 }
 
@@ -56,6 +60,9 @@ export interface QuestionResult {
   option_b: string
   option_c: string
   option_d: string
+  difficulty_label: Difficulty
+  topic_name: string
+  chapter_name: string
   student_answer: Answer | null
   correct_answer: Answer
   is_correct: boolean

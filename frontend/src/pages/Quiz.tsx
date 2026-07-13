@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import type { Answer, QuizState, SubmitResponse } from '../lib/quiz'
+import DifficultyBadge from '../components/DifficultyBadge'
 
 const OPTIONS: Answer[] = ['A', 'B', 'C', 'D']
 
@@ -75,10 +76,13 @@ export default function Quiz() {
       <main className="mx-auto max-w-2xl px-6 py-10">
         <div className="rounded-lg bg-white p-6 shadow">
           <div className="flex items-start justify-between gap-4">
-            <p className="font-medium text-gray-900">{question.question_text}</p>
-            <span className="shrink-0 rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600">
-              {question.difficulty_label}
-            </span>
+            <div>
+              <p className="text-xs text-gray-500">
+                {question.chapter_name} · {question.topic_name}
+              </p>
+              <p className="mt-1 font-medium text-gray-900">{question.question_text}</p>
+            </div>
+            <DifficultyBadge label={question.difficulty_label} />
           </div>
           <div className="mt-5 space-y-3">
             {OPTIONS.map((opt) => (

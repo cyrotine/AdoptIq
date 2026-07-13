@@ -87,7 +87,7 @@ const generate = async (studentId, input) => {
   const { data: candidates, error } = await supabase
     .from('questions')
     .select(
-      'question_id, question_text, option_a, option_b, option_c, option_d, difficulty_label, estimated_time, topics!inner(chapter_id)',
+      'question_id, question_text, option_a, option_b, option_c, option_d, difficulty_label, estimated_time, topics!inner(topic_name, chapter_id, chapters!inner(chapter_name))',
     )
     .in('topics.chapter_id', input.chapter_ids);
   if (error) throw new Error(`question lookup failed: ${error.message}`);
@@ -98,7 +98,12 @@ const generate = async (studentId, input) => {
 
   const buckets = { Easy: [], Medium: [], Hard: [] };
   for (const { topics, ...question } of candidates) {
-    buckets[question.difficulty_label].push({ ...question, chapter_id: topics.chapter_id });
+    buckets[question.difficulty_label].push({
+      ...question,
+      chapter_id: topics.chapter_id,
+      topic_name: topics.topic_name,
+      chapter_name: topics.chapters.chapter_name,
+    });
   }
 
   const mix = [['Easy', input.easy], ['Medium', input.medium], ['Hard', input.hard]];
@@ -132,7 +137,7 @@ const submit = async (studentId, input) => {
   const { data: questions, error } = await supabase
     .from('questions')
     .select(
-      'question_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, difficulty_label',
+      'question_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, difficulty_label, topics!inner(topic_name, chapters!inner(chapter_name))',
     )
     .in('question_id', ids);
   if (error) throw new Error(`question fetch failed: ${error.message}`);
@@ -144,11 +149,17 @@ const submit = async (studentId, input) => {
   const composition = { easy: 0, medium: 0, hard: 0 };
   let score = 0;
   const results = input.responses.map((response) => {
-    const { difficulty_label, ...question } = byId.get(response.question_id);
-    composition[difficulty_label.toLowerCase()]++;
+    const { topics, ...question } = byId.get(response.question_id);
+    composition[question.difficulty_label.toLowerCase()]++;
     const is_correct = response.student_answer === question.correct_answer;
     if (is_correct) score++;
-    return { ...question, student_answer: response.student_answer, is_correct };
+    return {
+      ...question,
+      topic_name: topics.topic_name,
+      chapter_name: topics.chapters.chapter_name,
+      student_answer: response.student_answer,
+      is_correct,
+    };
   });
 
   // ponytail: three separate writes, not one transaction (spec Risk 2) —
@@ -240,14 +251,22 @@ const getHistoryDetail = async (studentId, quizId) => {
   const ids = responses.map((r) => r.question_id);
   const { data: questions, error: questionsError } = await supabase
     .from('questions')
-    .select('question_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation')
+    .select(
+      'question_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, difficulty_label, topics!inner(topic_name, chapters!inner(chapter_name))',
+    )
     .in('question_id', ids);
   if (questionsError) throw new Error(`question lookup failed: ${questionsError.message}`);
 
   const byId = new Map(questions.map((q) => [q.question_id, q]));
   const results = responses.map(({ question_id, student_answer }) => {
-    const question = byId.get(question_id);
-    return { ...question, student_answer, is_correct: student_answer === question.correct_answer };
+    const { topics, ...question } = byId.get(question_id);
+    return {
+      ...question,
+      topic_name: topics.topic_name,
+      chapter_name: topics.chapters.chapter_name,
+      student_answer,
+      is_correct: student_answer === question.correct_answer,
+    };
   });
 
   return ok(200, {
