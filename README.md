@@ -12,8 +12,9 @@ what's deliberately not on the table.
 
 - **Auth** — JWT-based registration/login, passwords hashed.
 - **Question bank** — 800 NCERT-aligned MCQs across Maths and Science,
-  classes 9–10, seeded via `db/qns_seed.sql`. Each question carries a
-  `difficulty_score` (0–100) and a `difficulty_label` (Easy/Medium/Hard).
+  classes 9–10, seeded via `db/qns_seed.sql`. Each question carries an
+  `elo_question` (0–100) — its frozen Elo; the Easy/Medium/Hard label is
+  derived from it at read time, never stored.
 - **Quiz generation** (`POST /quiz/generate`) — student picks a subject and
   one or more chapters; backend pulls candidate questions, spreads them
   round-robin across chapters so none dominates, and fills an easy/medium/
@@ -161,10 +162,9 @@ re-running onboarding.
 ## Database Changes Required
 
 ```sql
--- questions: the existing difficulty_score becomes the canonical elo;
--- difficulty_label is dropped entirely (computed at read time instead).
-alter table questions rename column difficulty_score to elo;
-alter table questions drop column difficulty_label;
+-- questions: already done (spec 07, db/update.sql) — the numeric column is
+-- now elo_question (the canonical per-question Elo) and difficulty_label is
+-- dropped; the Easy/Medium/Hard band is computed from elo_question at read time.
 
 -- new: per-student, per-topic ability. A cache, not a source of truth —
 -- must be rebuildable by replaying quiz_responses through the update
@@ -181,8 +181,9 @@ create table student_topic_mastery (
 create index on student_topic_mastery (student_id);
 ```
 
-`elo`'s `check (... between 0 and 100)` constraint carries over unchanged
-from `difficulty_score` — no range migration needed, just a rename.
+The mastery `elo`'s `check (... between 0 and 100)` shares the same 0–100
+range as `elo_question`, so a student's ability and a question's difficulty
+are directly comparable — that comparison is what the update formula runs on.
 
 `quiz_history` and `quiz_responses` are untouched by this design. Richer
 behavioral signals (answer changes, revisits, position in quiz) were

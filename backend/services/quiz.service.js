@@ -11,6 +11,12 @@ const fail = (status, message) => ({ status, body: { error: message } });
 const QUIZ_SIZE = 30;
 const FILL_ORDER = ['Medium', 'Easy', 'Hard'];
 
+// Difficulty band derived from the question's frozen score (spec 07) — the label
+// is never stored. 0–34 Easy, 35–64 Medium, 65–100 Hard: keeps seed values
+// (20/50/80) mid-band. Display-only; selection buckets by band, never by a
+// stored label.
+const bandFromScore = (score) => (score < 35 ? 'Easy' : score < 65 ? 'Medium' : 'Hard');
+
 // In-place Fisher–Yates.
 const shuffle = (arr) => {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -87,7 +93,7 @@ const generate = async (studentId, input) => {
   const { data: candidates, error } = await supabase
     .from('questions')
     .select(
-      'question_id, question_text, option_a, option_b, option_c, option_d, difficulty_label, estimated_time, topics!inner(topic_name, chapter_id, chapters!inner(chapter_name))',
+      'question_id, question_text, option_a, option_b, option_c, option_d, elo_question, estimated_time, topics!inner(topic_name, chapter_id, chapters!inner(chapter_name))',
     )
     .in('topics.chapter_id', input.chapter_ids);
   if (error) throw new Error(`question lookup failed: ${error.message}`);
@@ -97,9 +103,11 @@ const generate = async (studentId, input) => {
   }
 
   const buckets = { Easy: [], Medium: [], Hard: [] };
-  for (const { topics, ...question } of candidates) {
-    buckets[question.difficulty_label].push({
+  for (const { topics, elo_question, ...question } of candidates) {
+    const difficulty_label = bandFromScore(elo_question);
+    buckets[difficulty_label].push({
       ...question,
+      difficulty_label,
       chapter_id: topics.chapter_id,
       topic_name: topics.topic_name,
       chapter_name: topics.chapters.chapter_name,
@@ -137,7 +145,7 @@ const submit = async (studentId, input) => {
   const { data: questions, error } = await supabase
     .from('questions')
     .select(
-      'question_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, difficulty_label, topics!inner(topic_name, chapters!inner(chapter_name))',
+      'question_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, elo_question, topics!inner(topic_name, chapters!inner(chapter_name))',
     )
     .in('question_id', ids);
   if (error) throw new Error(`question fetch failed: ${error.message}`);
@@ -149,12 +157,14 @@ const submit = async (studentId, input) => {
   const composition = { easy: 0, medium: 0, hard: 0 };
   let score = 0;
   const results = input.responses.map((response) => {
-    const { topics, ...question } = byId.get(response.question_id);
-    composition[question.difficulty_label.toLowerCase()]++;
+    const { topics, elo_question, ...question } = byId.get(response.question_id);
+    const difficulty_label = bandFromScore(elo_question);
+    composition[difficulty_label.toLowerCase()]++;
     const is_correct = response.student_answer === question.correct_answer;
     if (is_correct) score++;
     return {
       ...question,
+      difficulty_label,
       topic_name: topics.topic_name,
       chapter_name: topics.chapters.chapter_name,
       student_answer: response.student_answer,
@@ -252,16 +262,17 @@ const getHistoryDetail = async (studentId, quizId) => {
   const { data: questions, error: questionsError } = await supabase
     .from('questions')
     .select(
-      'question_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, difficulty_label, topics!inner(topic_name, chapters!inner(chapter_name))',
+      'question_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, elo_question, topics!inner(topic_name, chapters!inner(chapter_name))',
     )
     .in('question_id', ids);
   if (questionsError) throw new Error(`question lookup failed: ${questionsError.message}`);
 
   const byId = new Map(questions.map((q) => [q.question_id, q]));
   const results = responses.map(({ question_id, student_answer }) => {
-    const { topics, ...question } = byId.get(question_id);
+    const { topics, elo_question, ...question } = byId.get(question_id);
     return {
       ...question,
+      difficulty_label: bandFromScore(elo_question),
       topic_name: topics.topic_name,
       chapter_name: topics.chapters.chapter_name,
       student_answer,

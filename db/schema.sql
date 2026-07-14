@@ -50,8 +50,9 @@ create table questions (
   correct_answer    char(1) not null check (correct_answer in ('A', 'B', 'C', 'D')),
   explanation       text,
   topic_id          integer not null references topics(topic_id),
-  difficulty_label  varchar(10) not null check (difficulty_label in ('Easy', 'Medium', 'Hard')),
-  difficulty_score  smallint not null check (difficulty_score between 0 and 100),
+  -- Question's frozen Elo (0–100). The Easy/Medium/Hard band is derived from it
+  -- at read time (spec 07) — never stored. Frozen at creation.
+  elo_question      smallint not null check (elo_question between 0 and 100),
   estimated_time    integer
 );
 
