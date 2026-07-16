@@ -22,6 +22,19 @@ export const getToken = () => localStorage.getItem(TOKEN_KEY)
 export const setToken = (token: string) => localStorage.setItem(TOKEN_KEY, token)
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
 
+// Spec 08 — seed post-registration mastery baseline. Payload is one of:
+//   { mode: 'skip' } | { mode: 'manual', elo } | { mode: 'probe', subjects }
+export type BaselinePayload =
+  | { mode: 'skip' }
+  | { mode: 'manual'; elo: number }
+  | { mode: 'probe'; subjects: Record<string, { marks?: string; areas?: Record<string, number> }> }
+
+export const seedBaseline = (payload: BaselinePayload) =>
+  api<{ seeded: number }>('/api/mastery/baseline', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken()
   const res = await fetch(path, {

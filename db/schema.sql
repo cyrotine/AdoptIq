@@ -3,6 +3,7 @@
 -- drops below let this file reapply cleanly on a fresh/reset DB.
 -- gen_random_uuid() is built-in on Supabase; no extension needed.
 
+drop table if exists student_topic_mastery cascade;
 drop table if exists quiz_responses cascade;
 drop table if exists quiz_history cascade;
 drop table if exists questions cascade;
@@ -76,11 +77,24 @@ create table quiz_responses (
   primary key (quiz_id, question_id)
 );
 
+-- Per-topic student mastery Elo (0–100), spec 08. A MISSING row reads as the
+-- default 50, so rows equal to the default are never stored. Seeded from the
+-- post-registration probe; later updated by the Elo engine.
+create table student_topic_mastery (
+  student_id  uuid    not null references students(student_id) on delete cascade,
+  topic_id    integer not null references topics(topic_id),
+  elo         smallint not null default 50 check (elo between 0 and 100),
+  attempts    integer not null default 0,
+  updated_on  timestamp not null default now(),
+  primary key (student_id, topic_id)
+);
+
 create index on chapters (subject_id);
 create index on topics (chapter_id);
 create index on questions (topic_id);
 create index on quiz_history (student_id);
 create index on quiz_responses (question_id);
+create index on student_topic_mastery (student_id);
 
 -- =====================================================
 -- Backend Permissions

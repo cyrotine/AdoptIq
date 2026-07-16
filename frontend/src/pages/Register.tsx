@@ -22,7 +22,7 @@ export default function Register() {
         password: String(form.get('password')),
         class: Number(form.get('class')),
       })
-      navigate('/')
+      navigate('/onboarding')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'registration failed')
     } finally {

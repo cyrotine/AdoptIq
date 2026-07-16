@@ -3,6 +3,7 @@ import { AuthProvider } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import Onboarding from './pages/Onboarding'
 import Dashboard from './pages/Dashboard'
 import Quiz from './pages/Quiz'
 import Result from './pages/Result'
@@ -16,6 +17,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route element={<ProtectedRoute />}>
+            <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/" element={<Dashboard />} />
             <Route path="/quiz" element={<Quiz />} />
             <Route path="/result" element={<Result />} />
