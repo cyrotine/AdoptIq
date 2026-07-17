@@ -12,6 +12,7 @@ const {
   slipWeight,
   fatigueWeight,
   churnWeight,
+  headroomWeight,
 } = require('./mastery.service');
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
@@ -72,6 +73,21 @@ assert.strictEqual(forgetElo(80, new Date(now).toISOString(), now), 80, 'fresh t
 assert.strictEqual(forgetElo(80, null, now), 80, 'no timestamp => unchanged');
 const stale = forgetElo(80, new Date(now - 400 * day).toISOString(), now);
 assert.ok(stale < 80 && stale >= 80 + (50 - 80) * 0.15, 'very stale topic pulled toward 50, capped at 15%');
+
+// headroom: ceiling/floor effect. Neutral mid-scale, shrinks near either edge,
+// and only applies against the direction the move is already headed.
+assert.strictEqual(headroomWeight(0.375, 50), 1, 'mid-scale upward move => full step');
+assert.strictEqual(headroomWeight(-0.375, 50), 1, 'mid-scale downward move => full step');
+assert.ok(near(headroomWeight(0.375, 80), 0.4), 'near ceiling, upward move => shrunk (100-80)/50');
+assert.ok(near(headroomWeight(-0.375, 20), 0.4), 'near floor, downward move => shrunk 20/50');
+assert.strictEqual(headroomWeight(0.375, 20), 1, 'near floor but moving up (away from edge) => full step');
+assert.strictEqual(headroomWeight(-0.375, 80), 1, 'near ceiling but moving down (away from edge) => full step');
+assert.strictEqual(headroomWeight(0.375, 100), 0, 'at the ceiling, upward move => no room left');
+
+// same evidence buys less progress near the ceiling than mid-scale.
+const matchedMid = responseDelta({ Q: 50, score: 1, time_taken: 30, estimated_time: 30 }, 50, 12);
+const matchedHigh = responseDelta({ Q: 80, score: 1, time_taken: 30, estimated_time: 30 }, 80, 12);
+assert.ok(matchedHigh > 0 && matchedHigh < matchedMid, 'matched-difficulty win near ceiling moves less than mid-scale');
 
 // clamp keeps Elo in range; missing signals never throw.
 assert.strictEqual(clamp(150), 100);

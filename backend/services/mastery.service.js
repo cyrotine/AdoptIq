@@ -187,6 +187,7 @@ const CHURN_CAP = 3;         // ...to a 0.7 floor.
 const FORGET_START_DAYS = 30;// staleness beyond a month pulls S toward 50...
 const FORGET_SPAN_DAYS = 335;// ...reaching a max 15% pull after ~1 year.
 const FORGET_MAX = 0.15;
+const HEADROOM_SPAN = 50;    // room-to-edge scale: step shrinks to 0 as S nears 0/100.
 
 const clampRange = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
@@ -233,6 +234,12 @@ const forgetElo = (s, updatedOn, now = Date.now()) => {
   return s + (50 - s) * factor;
 };
 
+// Ceiling/floor effect: the step shrinks as S approaches whichever edge it's
+// moving toward (100 for an upward move, 0 for a downward one), so the same
+// evidence buys less progress near the extremes than it does mid-scale.
+const headroomWeight = (raw, s) =>
+  clampRange(raw > 0 ? (100 - s) / HEADROOM_SPAN : s / HEADROOM_SPAN, 0, 1);
+
 // One response's contribution to ΔS, against the batch-frozen ability `s`.
 // r = { Q, score (0|1), time_taken, estimated_time, position, answer_changes }.
 const responseDelta = (r, s, attempts) => {
@@ -242,7 +249,8 @@ const responseDelta = (r, s, attempts) => {
     slipWeight(r.score, s, r.Q, r.time_taken, r.estimated_time) *
     fatigueWeight(r.score, r.position) *
     churnWeight(r.answer_changes);
-  return dynamicK(attempts) * weight * (r.score - expectedScore(s, r.Q));
+  const raw = r.score - expectedScore(s, r.Q);
+  return dynamicK(attempts) * weight * headroomWeight(raw, s) * raw;
 };
 
 // Batch read of current mastery for a set of topics. Missing => the defaults.
@@ -317,4 +325,5 @@ module.exports = {
   fatigueWeight,
   churnWeight,
   speedWeight,
+  headroomWeight,
 };
