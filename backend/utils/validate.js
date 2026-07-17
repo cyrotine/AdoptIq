@@ -99,6 +99,18 @@ const validateGeneratedQuestion = (q) => {
   return null;
 };
 
+// Spec 13 — create-session request. Fields arrive from multipart form data, so
+// the controller parses them to Number before calling this (NaN fails Number.isInteger).
+const validateSessionCreate = ({ topic_id, target_elo, count }) => {
+  if (!Number.isInteger(topic_id) || topic_id < 1)
+    return 'topic_id must be a positive integer';
+  if (!Number.isInteger(target_elo) || target_elo < 0 || target_elo > 100)
+    return 'target_elo must be an integer between 0 and 100';
+  if (!Number.isInteger(count) || count < 1 || count > 20)
+    return 'count must be an integer between 1 and 20';
+  return null;
+};
+
 module.exports = {
   validateRegistration,
   validateLogin,
@@ -107,4 +119,5 @@ module.exports = {
   validateSubmit,
   validateQuizId,
   validateGeneratedQuestion,
+  validateSessionCreate,
 };

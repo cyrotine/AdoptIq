@@ -65,3 +65,47 @@ language sql stable as $$
   group by t.topic_id, t.topic_name, c.chapter_name, s.subject_name
   order by ask_count desc, t.topic_name;
 $$;
+
+-- Spec 13: generation sessions. pgvector + three tables. Non-destructive,
+-- safe to re-run. session_chunks/session_questions cascade-delete with their
+-- session; session_chunks (embeddings) are also deleted on finish.
+create extension if not exists vector;
+
+create table if not exists generation_sessions (
+  session_id   uuid primary key default gen_random_uuid(),
+  admin_id     uuid    not null references admins(admin_id),
+  topic_id     integer not null references topics(topic_id),
+  target_elo   smallint not null check (target_elo between 0 and 100),
+  status       text    not null default 'active' check (status in ('active', 'finished')),
+  created_on   timestamptz not null default now(),
+  finished_on  timestamptz
+);
+grant all privileges on table generation_sessions to service_role;
+
+create table if not exists session_chunks (
+  chunk_id    uuid primary key default gen_random_uuid(),
+  session_id  uuid not null references generation_sessions(session_id) on delete cascade,
+  content     text not null,
+  embedding   vector(768) not null,
+  created_on  timestamptz not null default now()
+);
+create index if not exists session_chunks_session_idx on session_chunks (session_id);
+grant all privileges on table session_chunks to service_role;
+
+create table if not exists session_questions (
+  session_question_id uuid primary key default gen_random_uuid(),
+  session_id     uuid not null references generation_sessions(session_id) on delete cascade,
+  question_text  text not null,
+  option_a       text not null,
+  option_b       text not null,
+  option_c       text not null,
+  option_d       text not null,
+  correct_answer char(1) not null check (correct_answer in ('A', 'B', 'C', 'D')),
+  explanation    text,
+  elo_question   smallint not null check (elo_question between 0 and 100),
+  estimated_time integer,
+  status         text not null default 'pending' check (status in ('pending', 'accepted', 'rejected')),
+  created_on     timestamptz not null default now()
+);
+create index if not exists session_questions_session_idx on session_questions (session_id);
+grant all privileges on table session_questions to service_role;

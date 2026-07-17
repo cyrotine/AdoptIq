@@ -2,7 +2,12 @@
 -- Run once against the Supabase project's Postgres database. Re-runnable: the
 -- drops below let this file reapply cleanly on a fresh/reset DB.
 -- gen_random_uuid() is built-in on Supabase; no extension needed.
+-- pgvector (spec 13) powers the ephemeral session_chunks embeddings.
+create extension if not exists vector;
 
+drop table if exists session_questions cascade;
+drop table if exists session_chunks cascade;
+drop table if exists generation_sessions cascade;
 drop table if exists student_topic_mastery cascade;
 drop table if exists quiz_responses cascade;
 drop table if exists quiz_history cascade;
@@ -104,12 +109,53 @@ create table student_topic_mastery (
   primary key (student_id, topic_id)
 );
 
+-- Generation sessions (spec 13). One durable row per admin generation workspace.
+create table generation_sessions (
+  session_id   uuid primary key default gen_random_uuid(),
+  admin_id     uuid    not null references admins(admin_id),
+  topic_id     integer not null references topics(topic_id),
+  target_elo   smallint not null check (target_elo between 0 and 100),
+  status       text    not null default 'active' check (status in ('active', 'finished')),
+  created_on   timestamptz not null default now(),
+  finished_on  timestamptz
+);
+
+-- Ephemeral processed document (spec 13): one row per chunk with its Gemini
+-- embedding. Deleted on finish; re-derivable from the source file.
+create table session_chunks (
+  chunk_id    uuid primary key default gen_random_uuid(),
+  session_id  uuid not null references generation_sessions(session_id) on delete cascade,
+  content     text not null,
+  embedding   vector(768) not null,
+  created_on  timestamptz not null default now()
+);
+
+-- Staging table for generated candidates (spec 13). Mirrors the questions
+-- columns (no computed difficulty label — band is derived from elo_question).
+create table session_questions (
+  session_question_id uuid primary key default gen_random_uuid(),
+  session_id     uuid not null references generation_sessions(session_id) on delete cascade,
+  question_text  text not null,
+  option_a       text not null,
+  option_b       text not null,
+  option_c       text not null,
+  option_d       text not null,
+  correct_answer char(1) not null check (correct_answer in ('A', 'B', 'C', 'D')),
+  explanation    text,
+  elo_question   smallint not null check (elo_question between 0 and 100),
+  estimated_time integer,
+  status         text not null default 'pending' check (status in ('pending', 'accepted', 'rejected')),
+  created_on     timestamptz not null default now()
+);
+
 create index on chapters (subject_id);
 create index on topics (chapter_id);
 create index on questions (topic_id);
 create index on quiz_history (student_id);
 create index on quiz_responses (question_id);
 create index on student_topic_mastery (student_id);
+create index on session_chunks (session_id);
+create index on session_questions (session_id);
 
 -- =====================================================
 -- Backend Permissions

@@ -41,10 +41,10 @@ const getReferenceQuestions = async (topicId, targetElo, threshold = 10) => {
   };
 };
 
-// In-memory orchestrator: chunk -> reference lookup -> prompt -> generate ->
-// validate each item. Returns a summary; writes nothing anywhere.
-const generateCandidates = async ({ topicId, targetElo, count, sourceText }) => {
-  const chunks = chunkText(sourceText);
+// Chunks-based orchestrator: reference lookup -> prompt -> generate -> validate
+// each item. Returns a summary; writes nothing anywhere. Spec 13 calls this with
+// chunks already stored in session_chunks, so a document is chunked only once.
+const generateFromChunks = async ({ topicId, targetElo, count, chunks }) => {
   const { topicName, chapterName, referenceQuestions } = await getReferenceQuestions(topicId, targetElo);
 
   const prompt = buildPrompt({ topicName, chapterName, chunks, referenceQuestions, targetElo, count });
@@ -68,4 +68,8 @@ const generateCandidates = async ({ topicId, targetElo, count, sourceText }) => 
   };
 };
 
-module.exports = { getReferenceQuestions, generateCandidates };
+// Spec 12 CLI entry: chunk the raw text, then delegate. Behaviour unchanged.
+const generateCandidates = ({ topicId, targetElo, count, sourceText }) =>
+  generateFromChunks({ topicId, targetElo, count, chunks: chunkText(sourceText) });
+
+module.exports = { getReferenceQuestions, generateFromChunks, generateCandidates };
