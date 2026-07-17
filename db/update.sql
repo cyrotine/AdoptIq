@@ -27,3 +27,41 @@ grant all privileges on table student_topic_mastery to service_role;
 alter table quiz_responses
   add column if not exists answer_changes smallint not null default 0,
   add column if not exists position       smallint;
+
+-- Spec 11: admin identity, separate from students. One row per administrator.
+-- Passwords bcrypt-hashed. Created via backend/scripts/createAdmin.js.
+-- Non-destructive; safe to re-run.
+create table if not exists admins (
+  admin_id      uuid primary key default gen_random_uuid(),
+  username      varchar(30) not null unique,
+  password_hash text not null,
+  created_on    timestamptz not null default now()
+);
+
+grant all privileges on table admins to service_role;
+
+-- Spec 11: times each topic has been asked, across all students. Derived from
+-- quiz_responses -> questions -> topics; NOT a stored counter (CLAUDE.md rule).
+-- LEFT JOINs so topics/questions with zero responses still appear (count 0).
+-- ponytail: full group-by scan over quiz_responses, no materialization. Fine at
+-- current volume. Promote to a materialized view / covering index only once the
+-- scan shows up in query time — not before.
+create or replace function topic_ask_counts()
+returns table (
+  topic_id     integer,
+  topic_name   text,
+  chapter_name text,
+  subject_name text,
+  ask_count    bigint
+)
+language sql stable as $$
+  select t.topic_id, t.topic_name, c.chapter_name, s.subject_name,
+         count(qr.question_id) as ask_count
+  from topics t
+  join chapters c on c.chapter_id = t.chapter_id
+  join subjects s on s.subject_id = c.subject_id
+  left join questions q on q.topic_id = t.topic_id
+  left join quiz_responses qr on qr.question_id = q.question_id
+  group by t.topic_id, t.topic_name, c.chapter_name, s.subject_name
+  order by ask_count desc, t.topic_name;
+$$;

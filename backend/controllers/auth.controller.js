@@ -27,4 +27,20 @@ const me = async (req, res, next) => {
   }
 };
 
-module.exports = { register, login, me };
+const adminLogin = async (req, res, next) => {
+  try {
+    send(res, await authService.adminLogin(req.body ?? {}));
+  } catch (err) {
+    next(err);
+  }
+};
+
+const adminMe = async (req, res, next) => {
+  try {
+    send(res, await authService.getAdmin(req.adminId));
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { register, login, me, adminLogin, adminMe };

@@ -16,11 +16,33 @@ export interface AuthResponse {
   student: Student
 }
 
+// Spec 11 — admin identity, separate from students.
+export interface Admin {
+  admin_id: string
+  username: string
+}
+
+export interface AdminAuthResponse {
+  token: string
+  admin: Admin
+}
+
+export type Role = 'student' | 'admin'
+
 const TOKEN_KEY = 'adaptiq_token'
+const ROLE_KEY = 'adaptiq_role'
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY)
 export const setToken = (token: string) => localStorage.setItem(TOKEN_KEY, token)
-export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
+// Which identity the stored token belongs to, so a cold reload restores the
+// right session (student /me vs admin /me).
+export const getRole = () => localStorage.getItem(ROLE_KEY) as Role | null
+export const setRole = (role: Role) => localStorage.setItem(ROLE_KEY, role)
+
+export const clearToken = () => {
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(ROLE_KEY)
+}
 
 // Spec 08 — seed post-registration mastery baseline. Payload is one of:
 //   { mode: 'skip' } | { mode: 'manual', elo } | { mode: 'probe', subjects }

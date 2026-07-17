@@ -10,6 +10,7 @@ drop table if exists questions cascade;
 drop table if exists topics cascade;
 drop table if exists chapters cascade;
 drop table if exists subjects cascade;
+drop table if exists admins cascade;
 drop table if exists students cascade;
 
 create table students (
@@ -21,6 +22,15 @@ create table students (
   class            smallint not null check (class in (9, 10)),
   total_quizzes    integer not null default 0,
   correct_answers  integer not null default 0
+);
+
+-- Administrators (spec 11). A second class of actor, kept fully separate from
+-- students — a student row can never become an admin. Passwords bcrypt-hashed.
+create table admins (
+  admin_id      uuid primary key default gen_random_uuid(),
+  username      varchar(30) not null unique,
+  password_hash text not null,
+  created_on    timestamptz not null default now()
 );
 
 create table subjects (
@@ -113,3 +123,33 @@ GRANT ALL PRIVILEGES ON TABLES TO service_role;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
 GRANT ALL PRIVILEGES ON SEQUENCES TO service_role;
+
+-- =====================================================
+-- Admin read models (spec 11)
+-- =====================================================
+
+-- Times each topic has been asked, across all students. Derived from
+-- quiz_responses -> questions -> topics; NOT a stored counter (CLAUDE.md rule).
+-- LEFT JOINs so topics/questions with zero responses still appear (count 0).
+-- ponytail: full group-by scan over quiz_responses, no materialization. Fine at
+-- current volume (few hundred responses). Promote to a materialized view or add
+-- a covering index only once the scan shows up in query time — not before.
+create or replace function topic_ask_counts()
+returns table (
+  topic_id     integer,
+  topic_name   text,
+  chapter_name text,
+  subject_name text,
+  ask_count    bigint
+)
+language sql stable as $$
+  select t.topic_id, t.topic_name, c.chapter_name, s.subject_name,
+         count(qr.question_id) as ask_count
+  from topics t
+  join chapters c on c.chapter_id = t.chapter_id
+  join subjects s on s.subject_id = c.subject_id
+  left join questions q on q.topic_id = t.topic_id
+  left join quiz_responses qr on qr.question_id = q.question_id
+  group by t.topic_id, t.topic_name, c.chapter_name, s.subject_name
+  order by ask_count desc, t.topic_name;
+$$;

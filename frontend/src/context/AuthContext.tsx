@@ -1,10 +1,23 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { api, getToken, setToken, clearToken, type Student, type AuthResponse } from '../lib/api'
+import {
+  api,
+  getToken,
+  setToken,
+  getRole,
+  setRole,
+  clearToken,
+  type Student,
+  type AuthResponse,
+  type Admin,
+  type AdminAuthResponse,
+} from '../lib/api'
 
 interface AuthState {
   student: Student | null
+  admin: Admin | null // spec 11 — set only when logged in as an admin
   loading: boolean // true while restoring the session on first load
   login: (identifier: string, password: string) => Promise<void>
+  adminLogin: (username: string, password: string) => Promise<void>
   register: (input: {
     name: string
     username: string
@@ -20,22 +33,26 @@ const AuthContext = createContext<AuthState | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [student, setStudent] = useState<Student | null>(null)
+  const [admin, setAdmin] = useState<Admin | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Restore session from a stored token on first load.
+  // Restore session from a stored token on first load — branch on the stored
+  // role so an admin token restores via the admin /me, not the student one.
   useEffect(() => {
     if (!getToken()) {
       setLoading(false)
       return
     }
-    api<{ student: Student }>('/api/auth/me')
-      .then(({ student }) => setStudent(student))
-      .catch(() => clearToken())
-      .finally(() => setLoading(false))
+    const restore =
+      getRole() === 'admin'
+        ? api<{ admin: Admin }>('/api/auth/admin/me').then(({ admin }) => setAdmin(admin))
+        : api<{ student: Student }>('/api/auth/me').then(({ student }) => setStudent(student))
+    restore.catch(() => clearToken()).finally(() => setLoading(false))
   }, [])
 
   const authenticate = (res: AuthResponse) => {
     setToken(res.token)
+    setRole('student')
     setStudent(res.student)
   }
 
@@ -46,6 +63,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ identifier, password }),
       }),
     )
+  }
+
+  const adminLogin = async (username: string, password: string) => {
+    const res = await api<AdminAuthResponse>('/api/auth/admin/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    })
+    setToken(res.token)
+    setRole('admin')
+    setAdmin(res.admin)
   }
 
   const register = async (input: {
@@ -66,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     clearToken()
     setStudent(null)
+    setAdmin(null)
   }
 
   const refresh = async () => {
@@ -74,7 +102,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ student, loading, login, register, logout, refresh }}>
+    <AuthContext.Provider
+      value={{ student, admin, loading, login, adminLogin, register, logout, refresh }}
+    >
       {children}
     </AuthContext.Provider>
   )
