@@ -84,6 +84,21 @@ const validateSubmit = ({ subject_id, total_time_taken, responses }) => {
   return null;
 };
 
+// Spec 12 — one AI-generated question candidate, checked at the same trust
+// boundary as any client body (JSON mode guarantees valid JSON, not a valid shape).
+const validateGeneratedQuestion = (q) => {
+  if (typeof q !== 'object' || q === null) return 'question must be an object';
+  for (const f of ['question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'explanation']) {
+    if (typeof q[f] !== 'string' || !q[f].trim()) return `${f} must be a non-empty string`;
+  }
+  if (!ANSWERS.includes(q.correct_answer)) return 'correct_answer must be A, B, C, or D';
+  if (!Number.isInteger(q.elo_question) || q.elo_question < 0 || q.elo_question > 100)
+    return 'elo_question must be an integer between 0 and 100';
+  if (!Number.isInteger(q.estimated_time) || q.estimated_time < 1)
+    return 'estimated_time must be a positive integer (seconds)';
+  return null;
+};
+
 module.exports = {
   validateRegistration,
   validateLogin,
@@ -91,4 +106,5 @@ module.exports = {
   validateGenerate,
   validateSubmit,
   validateQuizId,
+  validateGeneratedQuestion,
 };
