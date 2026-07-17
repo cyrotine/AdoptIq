@@ -20,6 +20,8 @@ export default function Quiz() {
   // Per-question elapsed ms, accumulated whenever the student leaves a question.
   const times = useRef<Record<string, number>>({})
   const enteredAt = useRef(Date.now())
+  // Per-question option switches before submit (spec 09 churn signal).
+  const changes = useRef<Record<string, number>>({})
 
   if (!state) return <Navigate to="/" replace />
   const { quiz, subjectId } = state
@@ -37,14 +39,23 @@ export default function Quiz() {
     setIndex(i)
   }
 
+  const selectOption = (opt: Answer) => {
+    const prev = answers[question.question_id]
+    if (prev !== undefined && prev !== opt)
+      changes.current[question.question_id] = (changes.current[question.question_id] ?? 0) + 1
+    setAnswers((a) => ({ ...a, [question.question_id]: opt }))
+  }
+
   const submit = async () => {
     recordTime()
     setSubmitting(true)
     setError('')
-    const responses = questions.map((q) => ({
+    const responses = questions.map((q, i) => ({
       question_id: q.question_id,
       student_answer: answers[q.question_id] ?? null,
       time_taken: Math.round((times.current[q.question_id] ?? 0) / 1000),
+      answer_changes: changes.current[q.question_id] ?? 0,
+      position: i + 1,
     }))
     const total_time_taken = responses.reduce((sum, r) => sum + r.time_taken, 0)
     try {
@@ -88,9 +99,7 @@ export default function Quiz() {
             {OPTIONS.map((opt) => (
               <button
                 key={opt}
-                onClick={() =>
-                  setAnswers((a) => ({ ...a, [question.question_id]: opt }))
-                }
+                onClick={() => selectOption(opt)}
                 className={`block w-full rounded-lg border p-3 text-left text-sm transition ${
                   answers[question.question_id] === opt
                     ? 'border-indigo-600 bg-indigo-50 text-indigo-700'

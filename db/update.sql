@@ -20,3 +20,10 @@ create index if not exists student_topic_mastery_student_idx
   on student_topic_mastery (student_id);
 
 grant all privileges on table student_topic_mastery to service_role;
+
+-- Spec 09: passive behavioural signals for the adaptive Elo engine. answer_changes
+-- counts option switches before submit; position is the 1-based ordinal in the
+-- quiz (for the fatigue discount). Non-destructive; safe to re-run.
+alter table quiz_responses
+  add column if not exists answer_changes smallint not null default 0,
+  add column if not exists position       smallint;

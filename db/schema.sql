@@ -74,6 +74,11 @@ create table quiz_responses (
   question_id     uuid not null references questions(question_id),
   student_answer  char(1) check (student_answer in ('A', 'B', 'C', 'D')),
   time_taken      integer,
+  -- Passive behavioural signals for the Elo engine (spec 09). answer_changes:
+  -- times the student switched option before submitting. position: 1-based
+  -- ordinal in the quiz (the PK is unordered), used for the fatigue discount.
+  answer_changes  smallint not null default 0,
+  position        smallint,
   primary key (quiz_id, question_id)
 );
 

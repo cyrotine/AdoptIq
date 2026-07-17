@@ -75,6 +75,11 @@ const validateSubmit = ({ subject_id, total_time_taken, responses }) => {
       return 'student_answer must be A, B, C, D, or null';
     if (!Number.isInteger(r.time_taken) || r.time_taken < 0)
       return 'each response needs a non-negative integer time_taken (seconds)';
+    // Optional spec-09 signals; missing is fine (engine falls back to neutral).
+    if (r.answer_changes !== undefined && (!Number.isInteger(r.answer_changes) || r.answer_changes < 0))
+      return 'answer_changes must be a non-negative integer';
+    if (r.position !== undefined && (!Number.isInteger(r.position) || r.position < 1))
+      return 'position must be a positive integer';
   }
   return null;
 };

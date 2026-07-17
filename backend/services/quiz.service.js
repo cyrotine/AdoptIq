@@ -1,5 +1,6 @@
 const supabase = require('../../db/supabase');
 const { getChapters } = require('./subject.service');
+const masteryService = require('./mastery.service');
 const { validateGenerate, validateSubmit, validateQuizId } = require('../utils/validate');
 
 const ok = (status, body) => ({ status, body });
@@ -145,7 +146,7 @@ const submit = async (studentId, input) => {
   const { data: questions, error } = await supabase
     .from('questions')
     .select(
-      'question_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, elo_question, topics!inner(topic_name, chapters!inner(chapter_name))',
+      'question_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, elo_question, estimated_time, topic_id, topics!inner(topic_name, chapters!inner(chapter_name))',
     )
     .in('question_id', ids);
   if (error) throw new Error(`question fetch failed: ${error.message}`);
@@ -153,15 +154,26 @@ const submit = async (studentId, input) => {
   const byId = new Map(questions.map((q) => [q.question_id, q]));
   if (byId.size !== ids.length) return fail(404, 'unknown question_id in submission');
 
-  // Grade server-side; unanswered (null) counts wrong.
+  // Grade server-side; unanswered (null) counts wrong. `graded` feeds the Elo
+  // engine (spec 09); topic_id / elo_question / estimated_time stay server-side.
   const composition = { easy: 0, medium: 0, hard: 0 };
   let score = 0;
-  const results = input.responses.map((response) => {
-    const { topics, elo_question, ...question } = byId.get(response.question_id);
+  const graded = [];
+  const results = input.responses.map((response, i) => {
+    const { topics, elo_question, estimated_time, topic_id, ...question } = byId.get(response.question_id);
     const difficulty_label = bandFromScore(elo_question);
     composition[difficulty_label.toLowerCase()]++;
     const is_correct = response.student_answer === question.correct_answer;
     if (is_correct) score++;
+    graded.push({
+      topic_id,
+      Q: elo_question,
+      score: is_correct ? 1 : 0,
+      time_taken: response.time_taken,
+      estimated_time,
+      position: response.position ?? i + 1,
+      answer_changes: response.answer_changes,
+    });
     return {
       ...question,
       difficulty_label,
@@ -190,11 +202,13 @@ const submit = async (studentId, input) => {
   if (historyError) throw new Error(`quiz_history insert failed: ${historyError.message}`);
 
   const { error: responsesError } = await supabase.from('quiz_responses').insert(
-    input.responses.map((r) => ({
+    input.responses.map((r, i) => ({
       quiz_id: quiz.quiz_id,
       question_id: r.question_id,
       student_answer: r.student_answer,
       time_taken: r.time_taken,
+      answer_changes: r.answer_changes ?? 0,
+      position: r.position ?? i + 1,
     })),
   );
   if (responsesError) throw new Error(`quiz_responses insert failed: ${responsesError.message}`);
@@ -208,6 +222,9 @@ const submit = async (studentId, input) => {
     })
     .eq('student_id', studentId);
   if (counterError) throw new Error(`student counter update failed: ${counterError.message}`);
+
+  // Move per-topic mastery Elo from this quiz (spec 09).
+  await masteryService.updateFromQuiz(studentId, graded);
 
   return ok(201, {
     quiz_id: quiz.quiz_id,

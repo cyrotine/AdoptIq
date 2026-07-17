@@ -160,9 +160,146 @@ const getTopicElo = async (studentId, topicId) => {
   return data ? data.elo : DEFAULT_ELO;
 };
 
+// ===========================================================================
+// Adaptive Elo engine (spec 09). After each quiz, per-topic Elo moves against
+// the ability the student STARTED the quiz with (batch, never sequentially) —
+// modulated by passive behavioural signals: engagement, slip, fatigue,
+// indecision, staleness. All constants are conservative, empirical KNOBS.
+// ===========================================================================
+
+const D = 32;             // logistic spread (0-100 scale); the main tuning knob.
+const K_MAX = 8;          // learning rate for a brand-new topic (attempts = 0).
+const K_MIN = 3;          // floor for a well-established topic.
+const TAU = 10;           // attempts-scale of the K decay.
+const GUESS = 0.25;       // 4-option MCQ guess floor on expected score.
+
+const RAPID_FRACTION = 0.15; // time < 0.15 * est  => rapid guess.
+const RAPID_WEIGHT = 0.15;
+const IDLE_MULT = 4;         // time > 4 * est     => idling / distracted.
+const IDLE_WEIGHT = 0.4;
+const SPEED_BETA = 0.15;     // engaged speed nudge, bounded [0.85, 1.15].
+const SLIP_GAP = 15;         // strong student (S - Q > 15) missing an easy item.
+const SLIP_WEIGHT = 0.5;     // ...counts as half a down-move (likely a slip).
+const FATIGUE_START = 15;    // errors after position 15 discounted...
+const FATIGUE_SLOPE = 0.005; // ...down to a 0.85 floor.
+const CHURN_SLOPE = 0.1;     // each answer change (capped at 3) dampens...
+const CHURN_CAP = 3;         // ...to a 0.7 floor.
+const FORGET_START_DAYS = 30;// staleness beyond a month pulls S toward 50...
+const FORGET_SPAN_DAYS = 335;// ...reaching a max 15% pull after ~1 year.
+const FORGET_MAX = 0.15;
+
+const clampRange = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+const expectedScore = (s, q) => GUESS + (1 - GUESS) / (1 + Math.pow(10, (q - s) / D));
+const dynamicK = (attempts) => K_MIN + (K_MAX - K_MIN) * Math.exp(-attempts / TAU);
+
+// A response is "engaged" only between the rapid-guess and idling time gates.
+// Missing estimated_time (older questions) is treated as engaged (neutral).
+const isEngaged = (time, est) =>
+  est == null || time == null || (time >= RAPID_FRACTION * est && time <= IDLE_MULT * est);
+
+const effortWeight = (time, est) => {
+  if (est == null || time == null) return 1;
+  if (time < RAPID_FRACTION * est) return RAPID_WEIGHT;
+  if (time > IDLE_MULT * est) return IDLE_WEIGHT;
+  return 1;
+};
+
+// Engaged only: faster-than-expected => >1, slower => <1. Neutral otherwise.
+const speedWeight = (time, est) => {
+  if (est == null || time == null || !isEngaged(time, est)) return 1;
+  return clampRange(1 + SPEED_BETA * (1 - time / est), 0.85, 1.15);
+};
+
+// Engaged wrong answer from a much stronger student on an easy item => slip.
+const slipWeight = (score, s, q, time, est) =>
+  score === 0 && isEngaged(time, est) && s - q > SLIP_GAP ? SLIP_WEIGHT : 1;
+
+// Wrong answers late in the quiz are weaker evidence of low skill.
+const fatigueWeight = (score, position) =>
+  score === 0 && position != null
+    ? clampRange(1 - FATIGUE_SLOPE * Math.max(0, position - FATIGUE_START), 0.85, 1)
+    : 1;
+
+// More answer switching => more indecision => less signal.
+const churnWeight = (answerChanges) =>
+  clampRange(1 - CHURN_SLOPE * Math.min(answerChanges ?? 0, CHURN_CAP), 0.7, 1);
+
+// Stale topic: nudge the starting Elo toward the neutral 50 before updating.
+const forgetElo = (s, updatedOn, now = Date.now()) => {
+  if (!updatedOn) return s;
+  const staleDays = (now - new Date(updatedOn).getTime()) / 86400000;
+  const factor = clampRange((staleDays - FORGET_START_DAYS) / FORGET_SPAN_DAYS, 0, FORGET_MAX);
+  return s + (50 - s) * factor;
+};
+
+// One response's contribution to ΔS, against the batch-frozen ability `s`.
+// r = { Q, score (0|1), time_taken, estimated_time, position, answer_changes }.
+const responseDelta = (r, s, attempts) => {
+  const weight =
+    effortWeight(r.time_taken, r.estimated_time) *
+    speedWeight(r.time_taken, r.estimated_time) *
+    slipWeight(r.score, s, r.Q, r.time_taken, r.estimated_time) *
+    fatigueWeight(r.score, r.position) *
+    churnWeight(r.answer_changes);
+  return dynamicK(attempts) * weight * (r.score - expectedScore(s, r.Q));
+};
+
+// Batch read of current mastery for a set of topics. Missing => the defaults.
+const getTopicMastery = async (studentId, topicIds) => {
+  const map = new Map(topicIds.map((id) => [id, { elo: DEFAULT_ELO, attempts: 0, updated_on: null }]));
+  if (!topicIds.length) return map;
+  const { data, error } = await supabase
+    .from('student_topic_mastery')
+    .select('topic_id, elo, attempts, updated_on')
+    .eq('student_id', studentId)
+    .in('topic_id', topicIds);
+  if (error) throw new Error(`mastery lookup failed: ${error.message}`);
+  for (const row of data) map.set(row.topic_id, { elo: row.elo, attempts: row.attempts, updated_on: row.updated_on });
+  return map;
+};
+
+// Per-quiz Elo update. `graded` is one entry per response (see responseDelta).
+// Rows are upserted even when Elo lands ~50: unlike a seeded baseline, an
+// attempted topic carries non-derivable `attempts` state that drives K.
+const updateFromQuiz = async (studentId, graded) => {
+  if (!graded || !graded.length) return { updated: 0 };
+
+  const byTopic = new Map();
+  for (const r of graded) {
+    if (!byTopic.has(r.topic_id)) byTopic.set(r.topic_id, []);
+    byTopic.get(r.topic_id).push(r);
+  }
+
+  const mastery = await getTopicMastery(studentId, [...byTopic.keys()]);
+  const now = new Date();
+  const rows = [];
+  for (const [topicId, responses] of byTopic) {
+    const { elo, attempts, updated_on } = mastery.get(topicId);
+    const s = forgetElo(elo, updated_on, now.getTime());
+    let delta = 0;
+    for (const r of responses) delta += responseDelta(r, s, attempts);
+    rows.push({
+      student_id: studentId,
+      topic_id: topicId,
+      elo: Math.round(clamp(s + delta)),
+      attempts: attempts + responses.length,
+      updated_on: now.toISOString(),
+    });
+  }
+
+  const { error } = await supabase
+    .from('student_topic_mastery')
+    .upsert(rows, { onConflict: 'student_id,topic_id' });
+  if (error) throw new Error(`mastery update failed: ${error.message}`);
+  return { updated: rows.length };
+};
+
 module.exports = {
   seedBaseline,
   getTopicElo,
+  getTopicMastery,
+  updateFromQuiz,
   // exported for the self-check test
   MARK_BAND_ELO,
   STAR_DELTA,
@@ -170,4 +307,14 @@ module.exports = {
   DEFAULT_ELO,
   validateBaseline,
   computeTargets,
+  clamp,
+  expectedScore,
+  dynamicK,
+  responseDelta,
+  forgetElo,
+  effortWeight,
+  slipWeight,
+  fatigueWeight,
+  churnWeight,
+  speedWeight,
 };
