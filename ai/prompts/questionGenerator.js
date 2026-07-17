@@ -2,10 +2,10 @@
 // ai/groq.js (the API client) so the prompt can change without touching the
 // client, per CLAUDE.md ("keep AI prompts modular"). Pure: no DB, no network.
 //
-// The chunks are the KNOWLEDGE source (what the questions are about); the
-// reference questions are STYLE/DIFFICULTY exemplars (how hard, what shape).
-// They enter the prompt in separate sections so the model never treats an
-// exemplar as source material.
+// The chunks are the ONLY source the model sees. Under the retrieval-driven
+// design (spec 13), existing questions are used as retrieval *queries* to pull
+// the most relevant chunks — they are never fed to the model as text. So this
+// prompt takes chunks, not questions.
 
 // The exact JSON shape the model must return. Embedded in the prompt text because
 // JSON mode constrains validity, not shape (the backend validator is the guard).
@@ -25,14 +25,8 @@ const SCHEMA = {
   ],
 };
 
-const buildPrompt = ({ topicName, chapterName, chunks, referenceQuestions, targetElo, count }) => {
+const buildPrompt = ({ topicName, chapterName, chunks, targetElo, count }) => {
   const knowledge = chunks.map((c, i) => `[${i + 1}] ${c}`).join('\n\n');
-
-  const exemplarSection = referenceQuestions.length
-    ? `STYLE/DIFFICULTY EXEMPLARS (existing questions near the target difficulty — match their style and difficulty, do NOT reuse their content):\n${referenceQuestions
-        .map((q) => `- (elo ${q.elo_question}) ${q.question_text}`)
-        .join('\n')}`
-    : 'No exemplar questions available; rely on the target difficulty number and the source material.';
 
   return [
     `You are an expert exam question author for the topic "${topicName}" (chapter "${chapterName}").`,
@@ -41,8 +35,6 @@ const buildPrompt = ({ topicName, chapterName, chunks, referenceQuestions, targe
     '',
     'SOURCE MATERIAL (the knowledge to test):',
     knowledge,
-    '',
-    exemplarSection,
     '',
     'Rules:',
     '- Each question has exactly four options (option_a..option_d) and one correct_answer ("A", "B", "C", or "D").',

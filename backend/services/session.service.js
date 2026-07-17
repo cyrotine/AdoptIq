@@ -1,16 +1,49 @@
-// Spec 13 — generation session business logic. Where the pure ai/* modules meet
-// the database: process an upload once (extract -> chunk -> embed -> store), then
-// stage the generated candidates. No permanent questions write (that is spec 14);
-// session_questions is a staging table only.
+// Spec 13 — generation session business logic. Process an upload once (extract ->
+// chunk -> embed -> store), then generate a batch by RETRIEVAL: existing seed
+// questions pull the most relevant chunks, and only those chunks reach the model.
+// Candidates are returned transiently — nothing about them is stored. Only an
+// ACCEPTED question is recorded (spec 14), and only as a link row into the
+// permanent questions table (session_questions = session_id + question_id).
 const supabase = require('../../db/supabase');
 const { extractText } = require('../../ai/extract');
 const { chunkText } = require('../../ai/chunk');
 const { embed } = require('../../ai/gemini');
-const { generateFromChunks } = require('./generation.service');
+const { getSeedQuestions, generateFromChunks } = require('./generation.service');
 
 // Service results are { status, body } — controllers just forward them.
 const ok = (status, body) => ({ status, body });
 const fail = (status, message) => ({ status, body: { error: message } });
+
+// Retrieve the chunks to generate from: for each seed question, embed it and pull
+// its top-5 most similar session chunks (match_session_chunks), unioned + deduped.
+// No seeds (topic has no questions at all) -> fall back to the whole document.
+const retrieveChunks = async (sessionId, seeds) => {
+  if (!seeds || seeds.length === 0) {
+    const { data, error } = await supabase
+      .from('session_chunks').select('content').eq('session_id', sessionId);
+    if (error) throw new Error(`chunk fallback fetch failed: ${error.message}`);
+    return (data || []).map((r) => r.content);
+  }
+
+  const seen = new Set();
+  const chunks = [];
+  for (const seed of seeds) {
+    const vector = await embed(seed.question_text);
+    const { data, error } = await supabase.rpc('match_session_chunks', {
+      target_session_id: sessionId,
+      query_embedding: JSON.stringify(vector), // pgvector wants the '[..]' text form
+      match_count: 5,
+    });
+    if (error) throw new Error(`chunk retrieval failed: ${error.message}`);
+    for (const row of data || []) {
+      if (!seen.has(row.chunk_id)) {
+        seen.add(row.chunk_id);
+        chunks.push(row.content);
+      }
+    }
+  }
+  return chunks;
+};
 
 const createSession = async ({ adminId, topicId, targetElo, count, filePath }) => {
   // Explicit topic check first: turns an FK violation into a clean 404 and avoids
@@ -31,9 +64,8 @@ const createSession = async ({ adminId, topicId, targetElo, count, filePath }) =
     .select().single();
   if (sessionErr) throw new Error(`session insert failed: ${sessionErr.message}`);
 
-  // ponytail: session_chunks.embedding has no READER in spec 13 — its consumers
-  // are spec 14 (semantic dedup) and 15 (chat retrieval). Computed once at upload,
-  // where they belong. pgvector wants the '[..]' text form, hence JSON.stringify.
+  // Store the processed document: one embedded chunk per row (ephemeral — deleted
+  // on finish). These embeddings are the retrieval store read just below.
   const chunkRows = [];
   for (const content of chunks) {
     const vector = await embed(content);
@@ -42,31 +74,14 @@ const createSession = async ({ adminId, topicId, targetElo, count, filePath }) =
   const { error: chunkErr } = await supabase.from('session_chunks').insert(chunkRows);
   if (chunkErr) throw new Error(`session_chunks insert failed: ${chunkErr.message}`);
 
-  // Generation reuses spec 12 unchanged, sourced from the stored chunks.
+  // Retrieval-driven generation: seed questions -> top-5 chunks each -> generate.
+  const seeds = await getSeedQuestions(topicId, targetElo);
+  const retrieved = await retrieveChunks(session.session_id, seeds);
   const { requested, generated, valid, invalid, candidates } =
-    await generateFromChunks({ topicId, targetElo, count, chunks });
+    await generateFromChunks({ topicId, targetElo, count, chunks: retrieved });
 
-  let questions = [];
-  if (candidates.length > 0) {
-    const questionRows = candidates.map((c) => ({
-      session_id: session.session_id,
-      question_text: c.question_text,
-      option_a: c.option_a,
-      option_b: c.option_b,
-      option_c: c.option_c,
-      option_d: c.option_d,
-      correct_answer: c.correct_answer,
-      explanation: c.explanation,
-      elo_question: c.elo_question,
-      estimated_time: c.estimated_time,
-    }));
-    const { data: inserted, error: qErr } = await supabase
-      .from('session_questions').insert(questionRows).select();
-    if (qErr) throw new Error(`session_questions insert failed: ${qErr.message}`);
-    questions = inserted;
-  }
-
-  return ok(201, { session, questions, summary: { requested, generated, valid, invalid } });
+  // Candidates are transient: returned to the admin's browser, stored nowhere.
+  return ok(201, { session, candidates, summary: { requested, generated, valid, invalid } });
 };
 
 const getSession = async (sessionId) => {
@@ -75,11 +90,14 @@ const getSession = async (sessionId) => {
   if (error) throw new Error(`session lookup failed: ${error.message}`);
   if (!session) return fail(404, 'session not found');
 
-  const { data: questions, error: qErr } = await supabase
-    .from('session_questions').select('*').eq('session_id', sessionId);
-  if (qErr) throw new Error(`session questions lookup failed: ${qErr.message}`);
+  // The only questions tied to a session are the ACCEPTED ones (spec 14), read
+  // through the link table into the permanent questions bank. Empty until accept.
+  const { data: links, error: qErr } = await supabase
+    .from('session_questions').select('questions(*)').eq('session_id', sessionId);
+  if (qErr) throw new Error(`session accepted-questions lookup failed: ${qErr.message}`);
+  const acceptedQuestions = (links || []).map((l) => l.questions).filter(Boolean);
 
-  return ok(200, { session, questions });
+  return ok(200, { session, acceptedQuestions });
 };
 
 const finishSession = async (sessionId) => {

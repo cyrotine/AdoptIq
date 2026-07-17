@@ -130,22 +130,14 @@ create table session_chunks (
   created_on  timestamptz not null default now()
 );
 
--- Staging table for generated candidates (spec 13). Mirrors the questions
--- columns (no computed difficulty label — band is derived from elo_question).
+-- Accepted-question link (spec 14). Records ONLY the questions an admin accepted
+-- in a session, as a reference into the permanent questions bank — no duplicated
+-- content. Generated candidates that are never accepted are stored nowhere.
 create table session_questions (
-  session_question_id uuid primary key default gen_random_uuid(),
-  session_id     uuid not null references generation_sessions(session_id) on delete cascade,
-  question_text  text not null,
-  option_a       text not null,
-  option_b       text not null,
-  option_c       text not null,
-  option_d       text not null,
-  correct_answer char(1) not null check (correct_answer in ('A', 'B', 'C', 'D')),
-  explanation    text,
-  elo_question   smallint not null check (elo_question between 0 and 100),
-  estimated_time integer,
-  status         text not null default 'pending' check (status in ('pending', 'accepted', 'rejected')),
-  created_on     timestamptz not null default now()
+  session_id  uuid not null references generation_sessions(session_id) on delete cascade,
+  question_id uuid not null references questions(question_id) on delete cascade,
+  created_on  timestamptz not null default now(),
+  primary key (session_id, question_id)
 );
 
 create index on chapters (subject_id);
@@ -198,4 +190,24 @@ language sql stable as $$
   left join quiz_responses qr on qr.question_id = q.question_id
   group by t.topic_id, t.topic_name, c.chapter_name, s.subject_name
   order by ask_count desc, t.topic_name;
+$$;
+
+-- =====================================================
+-- Generation retrieval (spec 13)
+-- =====================================================
+
+-- The match_count chunks in a session most similar to a query embedding, by
+-- cosine distance. Scoped to one session; brute-force scan (small per-session
+-- chunk count — no ANN index needed yet).
+create or replace function match_session_chunks(
+  target_session_id uuid,
+  query_embedding   vector(768),
+  match_count       integer
+) returns table (chunk_id uuid, content text, similarity float)
+language sql stable as $$
+  select chunk_id, content, 1 - (embedding <=> query_embedding) as similarity
+  from session_chunks
+  where session_id = target_session_id
+  order by embedding <=> query_embedding
+  limit match_count;
 $$;

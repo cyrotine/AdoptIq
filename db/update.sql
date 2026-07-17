@@ -92,20 +92,34 @@ create table if not exists session_chunks (
 create index if not exists session_chunks_session_idx on session_chunks (session_id);
 grant all privileges on table session_chunks to service_role;
 
+-- Retrieval over a session's chunks (spec 13): for a query embedding, the
+-- match_count most-similar chunks in that session, by cosine distance. Scoped to
+-- one session; brute-force scan (small per-session chunk count — no ANN index).
+create or replace function match_session_chunks(
+  target_session_id uuid,
+  query_embedding   vector(768),
+  match_count       integer
+) returns table (chunk_id uuid, content text, similarity float)
+language sql stable as $$
+  select chunk_id, content, 1 - (embedding <=> query_embedding) as similarity
+  from session_chunks
+  where session_id = target_session_id
+  order by embedding <=> query_embedding
+  limit match_count;
+$$;
+
+-- Spec 14 REDESIGN: session_questions is no longer a staging dump of every
+-- generated candidate. Candidates are transient (returned to the browser, stored
+-- nowhere). This table now records ONLY the questions an admin ACCEPTED in a
+-- session, as a link into the permanent questions bank — no duplicated content.
+-- Drop the old fat table (staging data is disposable) and recreate as a link.
+drop table if exists session_questions cascade;
+
 create table if not exists session_questions (
-  session_question_id uuid primary key default gen_random_uuid(),
-  session_id     uuid not null references generation_sessions(session_id) on delete cascade,
-  question_text  text not null,
-  option_a       text not null,
-  option_b       text not null,
-  option_c       text not null,
-  option_d       text not null,
-  correct_answer char(1) not null check (correct_answer in ('A', 'B', 'C', 'D')),
-  explanation    text,
-  elo_question   smallint not null check (elo_question between 0 and 100),
-  estimated_time integer,
-  status         text not null default 'pending' check (status in ('pending', 'accepted', 'rejected')),
-  created_on     timestamptz not null default now()
+  session_id  uuid not null references generation_sessions(session_id) on delete cascade,
+  question_id uuid not null references questions(question_id) on delete cascade,
+  created_on  timestamptz not null default now(),
+  primary key (session_id, question_id)
 );
 create index if not exists session_questions_session_idx on session_questions (session_id);
 grant all privileges on table session_questions to service_role;
