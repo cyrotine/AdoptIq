@@ -45,4 +45,14 @@ const finish = async (req, res, next) => {
   }
 };
 
-module.exports = { create, get, finish };
+// Accept a candidate: the full candidate is the JSON body; the service
+// re-validates it (trust boundary) and takes topic_id from the session.
+const accept = async (req, res, next) => {
+  try {
+    send(res, await sessionService.acceptQuestion(req.params.id, req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { create, get, finish, accept };

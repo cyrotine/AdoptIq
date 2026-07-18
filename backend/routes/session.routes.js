@@ -22,5 +22,6 @@ const upload = multer({
 router.post('/', requireAdmin, upload.single('file'), controller.create);
 router.get('/:id', requireAdmin, controller.get);
 router.post('/:id/finish', requireAdmin, controller.finish);
+router.post('/:id/accept', requireAdmin, controller.accept);
 
 module.exports = router;

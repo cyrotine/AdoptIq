@@ -10,6 +10,7 @@ import Quiz from './pages/Quiz'
 import Result from './pages/Result'
 import QuizReview from './pages/QuizReview'
 import AdminPanel from './pages/AdminPanel'
+import GenerationWorkspace from './pages/GenerationWorkspace'
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
           </Route>
           <Route element={<AdminRoute />}>
             <Route path="/admin" element={<AdminPanel />} />
+            <Route path="/admin/generate/:topicId" element={<GenerationWorkspace />} />
           </Route>
         </Routes>
       </BrowserRouter>

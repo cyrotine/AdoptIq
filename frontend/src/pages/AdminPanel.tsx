@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 
@@ -12,6 +13,7 @@ interface TopicStat {
 
 export default function AdminPanel() {
   const { admin, logout } = useAuth()
+  const navigate = useNavigate()
 
   const [topics, setTopics] = useState<TopicStat[] | null>(null)
   const [error, setError] = useState('')
@@ -89,9 +91,13 @@ export default function AdminPanel() {
                       {t.ask_count}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {/* spec 11: wired to spec-10 generator (per topic) in a follow-up. No-op. */}
+                      {/* spec 14: opens the Generation Workspace for this topic. */}
                       <button
-                        onClick={() => {}}
+                        onClick={() =>
+                          navigate(`/admin/generate/${t.topic_id}`, {
+                            state: { topicName: t.topic_name },
+                          })
+                        }
                         className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow hover:bg-indigo-700"
                       >
                         Generate

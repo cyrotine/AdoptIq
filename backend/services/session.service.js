@@ -9,6 +9,7 @@ const { extractText } = require('../../ai/extract');
 const { chunkText } = require('../../ai/chunk');
 const { embed } = require('../../ai/gemini');
 const { getSeedQuestions, generateFromChunks } = require('./generation.service');
+const { validateGeneratedQuestion } = require('../utils/validate');
 
 // Service results are { status, body } — controllers just forward them.
 const ok = (status, body) => ({ status, body });
@@ -121,4 +122,57 @@ const finishSession = async (sessionId) => {
   return ok(200, { session: finished });
 };
 
-module.exports = { createSession, getSession, finishSession };
+// Dedup normalization: trim, lowercase, collapse internal whitespace — spec 12's
+// "exact repeat" notion. Paraphrases are out of scope (semantic dedup is later).
+const normalize = (text) => text.trim().toLowerCase().replace(/\s+/g, ' ');
+
+// Accept a transient candidate: the only writer to the permanent questions table.
+// The full candidate arrives from the client, so this is a real trust boundary —
+// re-validate, and take topic_id from the SESSION (never the body).
+const acceptQuestion = async (sessionId, candidate) => {
+  const { data: session, error } = await supabase
+    .from('generation_sessions').select('*').eq('session_id', sessionId).maybeSingle();
+  if (error) throw new Error(`session lookup failed: ${error.message}`);
+  if (!session) return fail(404, 'session not found');
+  if (session.status === 'finished') return fail(409, 'session is finished');
+
+  const bad = validateGeneratedQuestion(candidate);
+  if (bad) return fail(400, bad);
+
+  // Exact-text dedup on the session's topic. ponytail: O(n) in-memory scan of the
+  // topic's questions; fine at this scale, a generated-column/index upgrade if a
+  // topic ever holds thousands of questions.
+  const { data: existing, error: dupErr } = await supabase
+    .from('questions').select('question_text').eq('topic_id', session.topic_id);
+  if (dupErr) throw new Error(`dedup lookup failed: ${dupErr.message}`);
+  const target = normalize(candidate.question_text);
+  if ((existing || []).some((q) => normalize(q.question_text) === target))
+    return fail(409, 'duplicate');
+
+  const { data: question, error: insErr } = await supabase
+    .from('questions')
+    .insert({
+      question_text: candidate.question_text,
+      option_a: candidate.option_a,
+      option_b: candidate.option_b,
+      option_c: candidate.option_c,
+      option_d: candidate.option_d,
+      correct_answer: candidate.correct_answer,
+      explanation: candidate.explanation,
+      elo_question: candidate.elo_question, // frozen at creation (spec 07)
+      estimated_time: candidate.estimated_time,
+      topic_id: session.topic_id, // authoritative from the session, not the body
+    })
+    .select().single();
+  if (insErr) throw new Error(`question insert failed: ${insErr.message}`);
+
+  // Link row — spec 15's Generate More reads this as extra retrieval seeds.
+  const { error: linkErr } = await supabase
+    .from('session_questions')
+    .insert({ session_id: sessionId, question_id: question.question_id });
+  if (linkErr) throw new Error(`session_questions insert failed: ${linkErr.message}`);
+
+  return ok(201, { question });
+};
+
+module.exports = { createSession, getSession, finishSession, acceptQuestion, normalize };
