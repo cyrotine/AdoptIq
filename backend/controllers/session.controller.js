@@ -1,6 +1,6 @@
 const fs = require('fs');
 const sessionService = require('../services/session.service');
-const { validateSessionCreate } = require('../utils/validate');
+const { validateSessionCreate, validateGenerateMore, validateChatMessages } = require('../utils/validate');
 
 const send = (res, { status, body }) => res.status(status).json(body);
 
@@ -55,4 +55,28 @@ const accept = async (req, res, next) => {
   }
 };
 
-module.exports = { create, get, finish, accept };
+// Spec 15 — another batch on an active session. JSON body (no multer).
+const generateMore = async (req, res, next) => {
+  try {
+    const count = Number(req.body.count);
+    const targetElo = req.body.target_elo === undefined ? undefined : Number(req.body.target_elo);
+    const bad = validateGenerateMore({ count, target_elo: targetElo });
+    if (bad) return send(res, { status: 400, body: { error: bad } });
+    send(res, await sessionService.generateMore(req.params.id, { count, targetElo }));
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Spec 15 — grounded chat turn. The transient conversation is the JSON body.
+const chat = async (req, res, next) => {
+  try {
+    const bad = validateChatMessages(req.body.messages);
+    if (bad) return send(res, { status: 400, body: { error: bad } });
+    send(res, await sessionService.chat(req.params.id, req.body.messages));
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { create, get, finish, accept, generateMore, chat };

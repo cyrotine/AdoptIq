@@ -129,3 +129,38 @@ export const finishSession = (sessionId: string) =>
   api<{ session: GenerationSession }>(`/api/admin/sessions/${sessionId}/finish`, {
     method: 'POST',
   })
+
+// Spec 15 — iterative session: another batch (steered by accepted questions) and
+// grounded chat. Both return transient candidates that join the same review list.
+type Summary = { requested?: number; generated: number; valid: number; invalid: number }
+
+export interface GenerateMoreResponse {
+  candidates: Candidate[]
+  summary: Summary
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatResponse {
+  reply: string
+  candidates: Candidate[]
+  summary: Summary
+}
+
+export const generateMore = (
+  sessionId: string,
+  body: { count: number; targetElo?: number },
+) =>
+  api<GenerateMoreResponse>(`/api/admin/sessions/${sessionId}/generate-more`, {
+    method: 'POST',
+    body: JSON.stringify({ count: body.count, target_elo: body.targetElo }),
+  })
+
+export const chat = (sessionId: string, messages: ChatMessage[]) =>
+  api<ChatResponse>(`/api/admin/sessions/${sessionId}/chat`, {
+    method: 'POST',
+    body: JSON.stringify({ messages }),
+  })

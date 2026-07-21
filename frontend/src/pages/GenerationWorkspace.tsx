@@ -3,13 +3,16 @@
 // discards locally) -> Finish the session. Candidates live only in React state;
 // only accepted ones are ever stored (as a permanent question + a link row).
 import { useState } from 'react'
-import { Link, useLocation, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   acceptCandidate,
+  chat,
   createSession,
   finishSession,
+  generateMore,
   type Candidate,
+  type ChatMessage,
   type GenerationSession,
 } from '../lib/api'
 
@@ -20,6 +23,7 @@ const LETTERS = ['A', 'B', 'C', 'D'] as const
 
 export default function GenerationWorkspace() {
   const { admin } = useAuth()
+  const navigate = useNavigate()
   const { topicId } = useParams()
   // Topic name is passed by the Generate button; fall back to the id.
   const topicName =
@@ -31,6 +35,14 @@ export default function GenerationWorkspace() {
   const [error, setError] = useState('')
   const [generating, setGenerating] = useState(false)
   const [finished, setFinished] = useState(false)
+
+  // Spec 15 — Generate More + grounded chat, both only while the session is active.
+  const [moreCount, setMoreCount] = useState(5)
+  const [moreElo, setMoreElo] = useState('') // '' -> reuse the session's target Elo
+  const [generatingMore, setGeneratingMore] = useState(false)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatting, setChatting] = useState(false)
 
   if (!admin) return null // AdminRoute guarantees admin; satisfy TS
 
@@ -81,8 +93,48 @@ export default function GenerationWorkspace() {
     try {
       await finishSession(session.session_id)
       setFinished(true)
+      // Show the "questions saved" confirmation briefly, then redirect to admin.
+      setTimeout(() => navigate('/admin'), 1200)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'finish failed')
+      setError(err instanceof Error ? err.message : 'save failed')
+    }
+  }
+
+  // Both iterative actions APPEND to the same candidates array so the index-keyed
+  // status map stays valid (new candidates default to 'pending').
+  const onGenerateMore = async () => {
+    if (!session) return
+    setError('')
+    setGeneratingMore(true)
+    try {
+      const { candidates: c } = await generateMore(session.session_id, {
+        count: moreCount,
+        targetElo: moreElo === '' ? undefined : Number(moreElo),
+      })
+      setCandidates((cs) => [...cs, ...c])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'generate more failed')
+    } finally {
+      setGeneratingMore(false)
+    }
+  }
+
+  const onSendChat = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!session || !chatInput.trim()) return
+    setError('')
+    const next: ChatMessage[] = [...messages, { role: 'user', content: chatInput.trim() }]
+    setMessages(next)
+    setChatInput('')
+    setChatting(true)
+    try {
+      const { reply, candidates: c } = await chat(session.session_id, next)
+      setMessages((m) => [...m, { role: 'assistant', content: reply }])
+      if (c.length) setCandidates((cs) => [...cs, ...c])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'chat failed')
+    } finally {
+      setChatting(false)
     }
   }
 
@@ -224,18 +276,102 @@ export default function GenerationWorkspace() {
           )
         })}
 
-        {/* Finish — closes the session once review is done. */}
+        {/* Spec 15 — iterative controls, only while the session is active. */}
         {session && !finished && (
-          <button
-            onClick={onFinish}
-            className="mt-6 w-full rounded-lg border border-gray-300 py-3 font-semibold text-gray-700 hover:bg-gray-50"
-          >
-            Finish session
-          </button>
+          <>
+            {/* Generate More — another batch, steered by accepted questions. */}
+            <div className="mt-6 rounded-lg bg-white p-6 shadow">
+              <h2 className="font-semibold text-gray-900">Generate more</h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Another batch from the same notes, steered by the questions you've accepted.
+              </p>
+              <div className="mt-3 flex items-end gap-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700">Count (1–20)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={moreCount}
+                    onChange={(e) => setMoreCount(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Target Elo (optional)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={moreElo}
+                    placeholder={String(session.target_elo)}
+                    onChange={(e) => setMoreElo(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <button
+                  onClick={onGenerateMore}
+                  disabled={generatingMore}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white shadow hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {generatingMore ? 'Generating…' : 'Generate more'}
+                </button>
+              </div>
+            </div>
+
+            {/* Chat — grounded in the uploaded notes; can also author questions. */}
+            <div className="mt-6 rounded-lg bg-white p-6 shadow">
+              <h2 className="font-semibold text-gray-900">Chat about these notes</h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Ask about the notes, or ask for questions (e.g. "give me 3 harder ones on X").
+              </p>
+              {messages.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {messages.map((m, i) => (
+                    <p
+                      key={i}
+                      className={
+                        m.role === 'user'
+                          ? 'rounded-lg bg-indigo-50 p-3 text-sm text-gray-800'
+                          : 'rounded-lg bg-gray-50 p-3 text-sm text-gray-700'
+                      }
+                    >
+                      <span className="font-semibold">{m.role === 'user' ? 'You' : 'AI'}: </span>
+                      {m.content}
+                    </p>
+                  ))}
+                </div>
+              )}
+              <form onSubmit={onSendChat} className="mt-3 flex gap-3">
+                <input
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Ask about the notes…"
+                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={chatting || !chatInput.trim()}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white shadow hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {chatting ? 'Sending…' : 'Send'}
+                </button>
+              </form>
+            </div>
+
+            <button
+              onClick={onFinish}
+              className="mt-6 w-full rounded-lg border border-gray-300 py-3 font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              Save session
+            </button>
+          </>
         )}
         {finished && (
-          <p className="mt-6 text-sm text-gray-500">
-            Session finished. <Link to="/admin" className="text-indigo-600">Back to Admin</Link>
+          <p className="mt-6 rounded-lg bg-green-50 px-4 py-3 text-sm font-medium text-green-700">
+            Questions saved — redirecting to dashboard…
           </p>
         )}
       </main>

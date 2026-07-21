@@ -8,7 +8,9 @@ const supabase = require('../../db/supabase');
 const { extractText } = require('../../ai/extract');
 const { chunkText } = require('../../ai/chunk');
 const { embed } = require('../../ai/gemini');
-const { getSeedQuestions, generateFromChunks } = require('./generation.service');
+const { getSeedQuestions, generateFromChunks, getTopicContext } = require('./generation.service');
+const { generateChat } = require('../../ai/groq');
+const { buildChatPrompt } = require('../../ai/prompts/chatPrompt');
 const { validateGeneratedQuestion } = require('../utils/validate');
 
 // Service results are { status, body } — controllers just forward them.
@@ -119,6 +121,12 @@ const finishSession = async (sessionId) => {
     .from('session_chunks').delete().eq('session_id', sessionId);
   if (delErr) throw new Error(`session_chunks cleanup failed: ${delErr.message}`);
 
+  // Accepted questions are already permanent in `questions`; the session_questions
+  // link rows only served as retrieval seeds for this session, so drop them too.
+  const { error: linkDelErr } = await supabase
+    .from('session_questions').delete().eq('session_id', sessionId);
+  if (linkDelErr) throw new Error(`session_questions cleanup failed: ${linkDelErr.message}`);
+
   return ok(200, { session: finished });
 };
 
@@ -175,4 +183,90 @@ const acceptQuestion = async (sessionId, candidate) => {
   return ok(201, { question });
 };
 
-module.exports = { createSession, getSession, finishSession, acceptQuestion, normalize };
+// The session's accepted questions, as lightweight retrieval seeds (spec 15).
+// Same link-table read as getSession, but selecting only the seed fields.
+const getAcceptedSeeds = async (sessionId) => {
+  const { data: links, error } = await supabase
+    .from('session_questions')
+    .select('questions(question_id, question_text, elo_question)')
+    .eq('session_id', sessionId);
+  if (error) throw new Error(`accepted seeds lookup failed: ${error.message}`);
+  return (links || []).map((l) => l.questions).filter(Boolean);
+};
+
+// Load a session or return the standard 404/409 result. Active = not finished.
+const loadActiveSession = async (sessionId) => {
+  const { data: session, error } = await supabase
+    .from('generation_sessions').select('*').eq('session_id', sessionId).maybeSingle();
+  if (error) throw new Error(`session lookup failed: ${error.message}`);
+  if (!session) return { session: null, result: fail(404, 'session not found') };
+  if (session.status === 'finished') return { session, result: fail(409, 'session is finished') };
+  return { session, result: null };
+};
+
+// Spec 15 — another batch within an active session, no re-upload. Seeds = topic
+// Elo-band ∪ this session's accepted questions, so accepted questions steer what
+// the next batch retrieves. Candidates matching accepted text are pre-dropped;
+// nothing is stored (Accept remains the only writer).
+const generateMore = async (sessionId, { count, targetElo }) => {
+  const { session, result } = await loadActiveSession(sessionId);
+  if (result) return result;
+
+  const elo = targetElo ?? session.target_elo;
+  const topicSeeds = await getSeedQuestions(session.topic_id, elo);
+  const acceptedSeeds = await getAcceptedSeeds(sessionId);
+
+  // Union topic + accepted seeds, dedup by question_id, cap to bound embed calls.
+  const seen = new Set();
+  const seeds = [];
+  for (const s of [...topicSeeds, ...acceptedSeeds]) {
+    if (!seen.has(s.question_id)) {
+      seen.add(s.question_id);
+      seeds.push(s);
+    }
+  }
+  const chunks = await retrieveChunks(sessionId, seeds.slice(0, 10));
+
+  const { requested, generated, valid, invalid, candidates } =
+    await generateFromChunks({ topicId: session.topic_id, targetElo: elo, count, chunks });
+
+  // Pre-dedup against accepted text so obvious repeats don't clutter review;
+  // Accept's exact-text dedup remains the backstop. Reuses seeds already fetched.
+  const acceptedTexts = new Set(acceptedSeeds.map((s) => normalize(s.question_text)));
+  const fresh = candidates.filter((c) => !acceptedTexts.has(normalize(c.question_text)));
+
+  return ok(201, { candidates: fresh, summary: { requested, generated, valid, invalid } });
+};
+
+// Spec 15 — grounded chat over the session's document. The last user message is
+// the retrieval query; only the chunks it pulls reach the model. A turn returns
+// prose (reply) and, when the admin asked for questions, validated candidates.
+const chat = async (sessionId, messages) => {
+  const { session, result } = await loadActiveSession(sessionId);
+  if (result) return result;
+
+  const query = messages[messages.length - 1].content;
+  const vector = await embed(query);
+  const { data, error } = await supabase.rpc('match_session_chunks', {
+    target_session_id: sessionId,
+    query_embedding: JSON.stringify(vector),
+    match_count: 6,
+  });
+  if (error) throw new Error(`chat retrieval failed: ${error.message}`);
+  const chunks = (data || []).map((r) => r.content);
+
+  const { topicName, chapterName } = await getTopicContext(session.topic_id);
+  const prompt = buildChatPrompt({ topicName, chapterName, chunks, messages });
+  const { reply, candidates } = await generateChat(prompt);
+
+  const valid = [];
+  let invalid = 0;
+  for (const c of candidates) {
+    if (validateGeneratedQuestion(c)) invalid += 1;
+    else valid.push(c);
+  }
+
+  return ok(200, { reply, candidates: valid, summary: { generated: candidates.length, valid: valid.length, invalid } });
+};
+
+module.exports = { createSession, getSession, finishSession, acceptQuestion, normalize, generateMore, chat };

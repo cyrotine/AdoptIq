@@ -25,4 +25,21 @@ const generateQuestions = async (prompt) => {
   return Array.isArray(parsed.questions) ? parsed.questions : [];
 };
 
-module.exports = { generateQuestions };
+// Spec 15 — one JSON-mode completion for the grounded chat. Returns { reply,
+// candidates } with safe defaults for missing/wrong-typed fields; candidates are
+// re-validated downstream (JSON mode guarantees valid JSON, not a valid shape).
+const generateChat = async (prompt) => {
+  const completion = await client.chat.completions.create({
+    model: 'llama-3.1-8b-instant',
+    response_format: { type: 'json_object' },
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const parsed = JSON.parse(completion.choices[0].message.content);
+  return {
+    reply: typeof parsed.reply === 'string' ? parsed.reply : '',
+    candidates: Array.isArray(parsed.candidates) ? parsed.candidates : [],
+  };
+};
+
+module.exports = { generateQuestions, generateChat };

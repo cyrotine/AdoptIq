@@ -8,9 +8,16 @@ const extractText = async (filePath) => {
   const ext = path.extname(filePath).toLowerCase();
 
   if (ext === '.pdf') {
-    const pdf = require('pdf-parse'); // required lazily so non-PDF paths don't load it
-    const data = await pdf(fs.readFileSync(filePath));
-    return data.text;
+    // pdf-parse v2 is class-based (v1's callable default is gone). Lazily required
+    // so non-PDF paths don't load it.
+    const { PDFParse } = require('pdf-parse');
+    const parser = new PDFParse({ data: fs.readFileSync(filePath) });
+    try {
+      const { text } = await parser.getText();
+      return text;
+    } finally {
+      await parser.destroy(); // release the worker
+    }
   }
 
   if (ext === '.txt' || ext === '.md') {

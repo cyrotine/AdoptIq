@@ -111,6 +111,34 @@ const validateSessionCreate = ({ topic_id, target_elo, count }) => {
   return null;
 };
 
+// Spec 15 — Generate More request. count is required (1-20); target_elo is
+// OPTIONAL (undefined -> service falls back to the session's stored target_elo).
+const validateGenerateMore = ({ count, target_elo }) => {
+  if (!Number.isInteger(count) || count < 1 || count > 20)
+    return 'count must be an integer between 1 and 20';
+  if (target_elo !== undefined && (!Number.isInteger(target_elo) || target_elo < 0 || target_elo > 100))
+    return 'target_elo must be an integer between 0 and 100';
+  return null;
+};
+
+// Spec 15 — the transient chat conversation. Non-empty array; each turn is a
+// { role, content } with a non-empty string content; the last turn must be the
+// user's (that message is the query the model answers/grounds on).
+const validateChatMessages = (messages) => {
+  if (!Array.isArray(messages) || messages.length === 0)
+    return 'messages must be a non-empty array';
+  for (const m of messages) {
+    if (typeof m !== 'object' || m === null) return 'each message must be an object';
+    if (m.role !== 'user' && m.role !== 'assistant')
+      return "each message role must be 'user' or 'assistant'";
+    if (typeof m.content !== 'string' || !m.content.trim())
+      return 'each message needs non-empty content';
+  }
+  if (messages[messages.length - 1].role !== 'user')
+    return 'the last message must be from the user';
+  return null;
+};
+
 module.exports = {
   validateRegistration,
   validateLogin,
@@ -120,4 +148,6 @@ module.exports = {
   validateQuizId,
   validateGeneratedQuestion,
   validateSessionCreate,
+  validateGenerateMore,
+  validateChatMessages,
 };
