@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { AuthCard, Field } from '../components/AuthForm'
+import { AuthCard, Choice, Field } from '../components/AuthForm'
 
 export default function Login() {
   const { login, adminLogin } = useAuth()
@@ -34,28 +34,29 @@ export default function Login() {
 
   return (
     <AuthCard
-      title="Log in to AdaptIQ"
+      title="Welcome back"
+      standfirst="Pick up where your rating left off."
       error={error}
       submitting={submitting}
       submitLabel="Log in"
       onSubmit={onSubmit}
       footer={
         <>
-          New here? <Link to="/register" className="text-indigo-600 hover:underline">Create an account</Link>
+          New here?{' '}
+          <Link to="/register" className="font-medium text-signal underline underline-offset-4">
+            Create an account
+          </Link>
         </>
       }
     >
-      <label className="block">
-        <span className="mb-1 block text-sm font-medium text-gray-700">Log in as</span>
-        <select
-          value={role}
-          onChange={(e) => setRole(e.target.value as 'student' | 'admin')}
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-        >
-          <option value="student">Student</option>
-          <option value="admin">Admin</option>
-        </select>
-      </label>
+      <Choice
+        label="Log in as"
+        value={role}
+        onChange={(e) => setRole(e.target.value as 'student' | 'admin')}
+      >
+        <option value="student">Student</option>
+        <option value="admin">Admin</option>
+      </Choice>
       <Field label="Username or email" name="identifier" required autoFocus />
       <Field label="Password" name="password" type="password" required />
     </AuthCard>

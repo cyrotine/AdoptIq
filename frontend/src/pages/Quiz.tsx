@@ -2,10 +2,14 @@ import { useRef, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
-import type { Answer, QuizState, SubmitResponse } from '../lib/quiz'
+import type { Answer, Difficulty, QuizState, SubmitResponse } from '../lib/quiz'
 import DifficultyBadge from '../components/DifficultyBadge'
+import Shell, { Notice } from '../components/Shell'
+import { Tape, type Tone } from '../components/Tape'
 
 const OPTIONS: Answer[] = ['A', 'B', 'C', 'D']
+
+const TONE_OF: Record<Difficulty, Tone> = { Easy: 'easy', Medium: 'medium', Hard: 'hard' }
 
 export default function Quiz() {
   const state = useLocation().state as QuizState | null
@@ -76,74 +80,85 @@ export default function Quiz() {
   const answered = Object.keys(answers).length
   const last = index === questions.length - 1
 
+  // One tick per question: filled in its difficulty colour once answered.
+  const tones: Tone[] = questions.map((q) =>
+    answers[q.question_id] ? TONE_OF[q.difficulty_label] : 'idle',
+  )
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="flex items-center justify-between bg-white px-6 py-4 shadow-sm">
-        <span className="text-lg font-bold text-indigo-600">AdaptIQ · {quiz.subject}</span>
-        <span className="text-sm text-gray-500">
-          Question {index + 1}/{questions.length} · {answered} answered
+    <Shell
+      context={quiz.subject}
+      right={
+        <span className="font-util text-xs tabular-nums text-muted">
+          <span className="font-semibold text-ink">{index + 1}</span>/{questions.length} ·{' '}
+          {answered} answered
         </span>
-      </header>
-      <main className="mx-auto max-w-2xl px-6 py-10">
-        <div className="rounded-lg bg-white p-6 shadow">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs text-gray-500">
-                {question.chapter_name} · {question.topic_name}
-              </p>
-              <p className="mt-1 font-medium text-gray-900">{question.question_text}</p>
-            </div>
-            <DifficultyBadge label={question.difficulty_label} />
-          </div>
-          <div className="mt-5 space-y-3">
-            {OPTIONS.map((opt) => (
-              <button
-                key={opt}
-                onClick={() => selectOption(opt)}
-                className={`block w-full rounded-lg border p-3 text-left text-sm transition ${
-                  answers[question.question_id] === opt
-                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                    : 'border-gray-200 text-gray-700 hover:border-indigo-300'
+      }
+      rail={<Tape tones={tones} current={index} onSelect={goTo} label="Jump to a question" />}
+    >
+      <p className="eyebrow">
+        {question.chapter_name} · {question.topic_name}
+      </p>
+      <div className="mt-3 flex items-start justify-between gap-6">
+        <p className="text-xl leading-snug text-ink">{question.question_text}</p>
+        <span className="pt-1">
+          <DifficultyBadge label={question.difficulty_label} />
+        </span>
+      </div>
+
+      <div className="mt-7 space-y-2">
+        {OPTIONS.map((opt) => {
+          const picked = answers[question.question_id] === opt
+          return (
+            <button
+              key={opt}
+              onClick={() => selectOption(opt)}
+              aria-pressed={picked}
+              className={`flex w-full items-baseline gap-3.5 rounded-lg border px-4 py-3.5 text-left text-[16px] transition ${
+                picked
+                  ? 'border-signal bg-signal-soft text-ink'
+                  : 'border-rule bg-raise text-muted hover:border-signal hover:text-ink'
+              }`}
+            >
+              <span
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded font-util text-xs font-semibold ${
+                  picked ? 'bg-signal text-white' : 'bg-face text-muted'
                 }`}
               >
-                <span className="mr-2 font-semibold">{opt}.</span>
-                {optionText(opt)}
-              </button>
-            ))}
-          </div>
-        </div>
+                {opt}
+              </span>
+              <span>{optionText(opt)}</span>
+            </button>
+          )
+        })}
+      </div>
 
-        {error && (
-          <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>
-        )}
+      {error && <div className="mt-5">
+        <Notice>{error}</Notice>
+      </div>}
 
-        <div className="mt-6 flex items-center justify-between">
-          <button
-            onClick={() => goTo(index - 1)}
-            disabled={index === 0 || submitting}
-            className="rounded-lg border border-gray-300 bg-white px-5 py-2 text-sm font-medium text-gray-700 disabled:opacity-40"
-          >
-            Previous
+      <div className="mt-8 flex items-center justify-between">
+        <button
+          onClick={() => goTo(index - 1)}
+          disabled={index === 0 || submitting}
+          className="btn btn-quiet px-5 py-2.5"
+        >
+          Previous
+        </button>
+        {last ? (
+          <button onClick={submit} disabled={submitting} className="btn btn-solid px-6 py-2.5">
+            {submitting ? 'Submitting…' : 'Submit test'}
           </button>
-          {last ? (
-            <button
-              onClick={submit}
-              disabled={submitting}
-              className="rounded-lg bg-indigo-600 px-6 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {submitting ? 'Submitting…' : 'Submit Test'}
-            </button>
-          ) : (
-            <button
-              onClick={() => goTo(index + 1)}
-              disabled={submitting}
-              className="rounded-lg bg-indigo-600 px-6 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-            >
-              Next
-            </button>
-          )}
-        </div>
-      </main>
-    </div>
+        ) : (
+          <button
+            onClick={() => goTo(index + 1)}
+            disabled={submitting}
+            className="btn btn-solid px-6 py-2.5"
+          >
+            Next
+          </button>
+        )}
+      </div>
+    </Shell>
   )
 }

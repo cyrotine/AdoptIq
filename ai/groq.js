@@ -16,6 +16,10 @@ const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const generateQuestions = async (prompt) => {
   const completion = await client.chat.completions.create({
     model: 'llama-3.1-8b-instant',
+    // Below the API default of 1.0: this is extraction from retrieved chunks,
+    // not creative writing. Still loose enough that Generate More returns a
+    // different batch rather than near-duplicates of the first.
+    temperature: 0.5,
     response_format: { type: 'json_object' },
     messages: [{ role: 'user', content: prompt }],
   });
@@ -31,6 +35,9 @@ const generateQuestions = async (prompt) => {
 const generateChat = async (prompt) => {
   const completion = await client.chat.completions.create({
     model: 'llama-3.1-8b-instant',
+    // Higher than generation — a chat reply should read naturally — but still
+    // reined in so answers stay on the retrieved chunks.
+    temperature: 0.7,
     response_format: { type: 'json_object' },
     messages: [{ role: 'user', content: prompt }],
   });

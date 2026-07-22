@@ -3,16 +3,19 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 import type { Chapter, GenerateResponse, HistoryItem, Subject } from '../lib/quiz'
+import Shell, { Notice, PageHead, Quiet, RailButton, SectionHead } from '../components/Shell'
+import { Gauge, Tape, type Tone } from '../components/Tape'
 
 const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 
+const QUESTIONS_PER_QUIZ = 30
 const DEFAULT_SPLIT = { easy: 12, medium: 12, hard: 6 }
 
-// Difficulty sliders: label + colored thumb (green/amber/red) matching DifficultyBadge.
+// Difficulty sliders, sharing the scale colours with DifficultyBadge.
 const SLIDERS = [
-  { key: 'easy', label: 'Easy', accent: 'accent-green-500', dot: 'bg-green-500' },
-  { key: 'medium', label: 'Medium', accent: 'accent-amber-500', dot: 'bg-amber-500' },
-  { key: 'hard', label: 'Hard', accent: 'accent-red-500', dot: 'bg-red-500' },
+  { key: 'easy', label: 'Easy', tone: 'easy', bar: 'bg-easy' },
+  { key: 'medium', label: 'Medium', tone: 'medium', bar: 'bg-medium' },
+  { key: 'hard', label: 'Hard', tone: 'hard', bar: 'bg-hard' },
 ] as const
 
 export default function Dashboard() {
@@ -76,7 +79,13 @@ export default function Dashboard() {
   }
 
   const total = split.easy + split.medium + split.hard
-  const remaining = 30 - total
+  const remaining = QUESTIONS_PER_QUIZ - total
+
+  // The mix drawn as the 30 questions it actually is — one tick each, coloured
+  // by the band it is assigned to, grey while still unassigned.
+  const mixTones: Tone[] = SLIDERS.flatMap(({ key, tone }) =>
+    Array<Tone>(split[key]).fill(tone),
+  ).concat(Array<Tone>(Math.max(0, remaining)).fill('idle'))
   const canGenerate = selected !== null && checked.size > 0 && total === 30 && !generating
 
   const generate = async () => {
@@ -109,148 +118,167 @@ export default function Dashboard() {
     : 0
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="flex items-center justify-between bg-white px-6 py-4 shadow-sm">
-        <span className="text-lg font-bold text-indigo-600">AdaptIQ</span>
-        <button onClick={logout} className="text-sm text-gray-500 hover:text-gray-900">
-          Log out
-        </button>
-      </header>
-      <main className="mx-auto max-w-3xl px-6 py-12">
-        <h1 className="text-2xl font-bold text-gray-900">Welcome, {student.name}</h1>
-        <p className="mt-2 text-gray-600">
-          Class {student.class} · @{student.username}
-        </p>
+    <Shell wide right={<RailButton onClick={logout}>Log out</RailButton>}>
+      <p className="eyebrow">
+        Class {student.class} · @{student.username}
+      </p>
+      <div className="mt-3">
+        <PageHead title={student.name} />
+      </div>
 
-        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="rounded-lg bg-white p-4 shadow-sm">
-            <p className="text-sm text-gray-500">Quizzes taken</p>
-            <p className="mt-1 text-2xl font-bold text-gray-900">{student.total_quizzes}</p>
-          </div>
-          <div className="rounded-lg bg-white p-4 shadow-sm">
-            <p className="text-sm text-gray-500">Correct answers</p>
-            <p className="mt-1 text-2xl font-bold text-gray-900">{student.correct_answers}</p>
-          </div>
-          <div className="rounded-lg bg-white p-4 shadow-sm">
-            <p className="text-sm text-gray-500">Overall accuracy</p>
-            <p className="mt-1 text-2xl font-bold text-indigo-600">
-              {Math.round(overallAccuracy * 100)}%
-            </p>
-          </div>
+      {/* Where the student sits on the 0–100 scale the platform rates on. */}
+      <div className="mt-10">
+        <SectionHead label="Overall accuracy" />
+        <div className="mt-5">
+          <Gauge value={overallAccuracy * 100} caption="Overall accuracy" />
         </div>
+        <p className="mt-4 font-util text-[11px] uppercase tracking-[0.1em] text-muted">
+          <span className="font-semibold tabular-nums text-ink">{student.total_quizzes}</span> tests
+          taken ·{' '}
+          <span className="font-semibold tabular-nums text-ink">{student.correct_answers}</span>{' '}
+          correct answers
+        </p>
+      </div>
 
-        <section className="mt-8">
-          <h2 className="text-lg font-semibold text-gray-900">Start a new test</h2>
+      <section className="mt-14">
+        <SectionHead label="New test" />
 
-          {error && (
-            <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>
-          )}
+        {error && (
+          <div className="mt-5">
+            <Notice>{error}</Notice>
+          </div>
+        )}
+        {subjects === null && !error && (
+          <div className="mt-5">
+            <Quiet>Loading subjects…</Quiet>
+          </div>
+        )}
+        {subjects?.length === 0 && (
+          <div className="mt-5">
+            <Quiet>No subjects available yet.</Quiet>
+          </div>
+        )}
 
-          {subjects === null && !error && (
-            <p className="mt-3 text-sm text-gray-500">Loading subjects…</p>
-          )}
+        {subjects && subjects.length > 0 && (
+          <>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              {subjects.map((s) => (
+                <button
+                  key={s.subject_id}
+                  onClick={() => selectSubject(s.subject_id)}
+                  aria-pressed={selected === s.subject_id}
+                  className={`rounded-lg border px-4 py-4 text-left font-display expanded text-lg font-bold tracking-tight transition ${
+                    selected === s.subject_id
+                      ? 'border-signal bg-signal-soft text-signal'
+                      : 'border-rule bg-raise text-muted hover:border-signal hover:text-ink'
+                  }`}
+                >
+                  {s.subject_name}
+                </button>
+              ))}
+            </div>
 
-          {subjects?.length === 0 && (
-            <p className="mt-3 text-sm text-gray-500">No subjects available yet.</p>
-          )}
-
-          {subjects && subjects.length > 0 && (
-            <>
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                {subjects.map((s) => (
-                  <button
-                    key={s.subject_id}
-                    onClick={() => selectSubject(s.subject_id)}
-                    className={`rounded-lg border p-4 text-left font-medium shadow-sm transition ${
-                      selected === s.subject_id
-                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                        : 'border-gray-200 bg-white text-gray-700 hover:border-indigo-300'
-                    }`}
-                  >
-                    {s.subject_name}
-                  </button>
-                ))}
-              </div>
-
-              {selected !== null && (
-                <div className="mt-6">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-gray-900">Chapters</h3>
-                    {chapters && chapters.length > 0 && (
+            {selected !== null && (
+              <div className="mt-10">
+                <SectionHead
+                  label="Chapters"
+                  aside={
+                    chapters &&
+                    chapters.length > 0 && (
                       <button
                         onClick={() =>
                           setChecked(
-                            checked.size > 0 ? new Set() : new Set(chapters.map((c) => c.chapter_id)),
+                            checked.size > 0
+                              ? new Set()
+                              : new Set(chapters.map((c) => c.chapter_id)),
                           )
                         }
-                        className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                        className="eyebrow shrink-0 hover:text-signal"
                       >
                         {checked.size > 0 ? 'Clear all' : 'Select all'}
                       </button>
-                    )}
+                    )
+                  }
+                />
+
+                {chaptersError && (
+                  <div className="mt-4">
+                    <Notice>{chaptersError}</Notice>
                   </div>
+                )}
+                {chapters === null && !chaptersError && (
+                  <div className="mt-4">
+                    <Quiet>Loading chapters…</Quiet>
+                  </div>
+                )}
+                {chapters?.length === 0 && (
+                  <div className="mt-4">
+                    <Quiet>No chapters for this subject yet.</Quiet>
+                  </div>
+                )}
 
-                  {chaptersError && (
-                    <p className="mt-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
-                      {chaptersError}
-                    </p>
-                  )}
-                  {chapters === null && !chaptersError && (
-                    <p className="mt-2 text-sm text-gray-500">Loading chapters…</p>
-                  )}
-                  {chapters?.length === 0 && (
-                    <p className="mt-2 text-sm text-gray-500">No chapters for this subject yet.</p>
-                  )}
-
-                  {chapters && chapters.length > 0 && (
-                    <>
-                      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        {chapters.map((c) => (
-                          <label
-                            key={c.chapter_id}
-                            className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked.has(c.chapter_id)}
-                              onChange={() => toggleChapter(c.chapter_id)}
-                              className="h-4 w-4 rounded border-gray-300 text-indigo-600"
-                            />
-                            {c.chapter_name}
-                          </label>
-                        ))}
-                      </div>
-                      {checked.size === 0 && (
-                        <p className="mt-2 text-sm text-amber-600">Select at least one chapter.</p>
-                      )}
-
-                      <div className="mt-6 flex items-center justify-between">
-                        <h3 className="text-sm font-semibold text-gray-900">Difficulty</h3>
-                        <span
-                          className={`text-sm font-medium ${
-                            total === 30 ? 'text-gray-500' : 'text-amber-600'
-                          }`}
+                {chapters && chapters.length > 0 && (
+                  <>
+                    <div className="mt-4 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                      {chapters.map((c) => (
+                        <label
+                          key={c.chapter_id}
+                          className="flex cursor-pointer items-center gap-3 rounded-md border border-rule bg-raise px-3 py-2.5 text-[15px] text-ink hover:border-signal"
                         >
-                          {total === 30 ? '30 / 30 questions' : `${remaining} left to assign`}
-                        </span>
+                          <input
+                            type="checkbox"
+                            checked={checked.has(c.chapter_id)}
+                            onChange={() => toggleChapter(c.chapter_id)}
+                            className="h-4 w-4 accent-signal"
+                          />
+                          {c.chapter_name}
+                        </label>
+                      ))}
+                    </div>
+                    {checked.size === 0 && (
+                      <p className="eyebrow mt-3 text-hard">Pick at least one chapter</p>
+                    )}
+
+                    {/* The mix, drawn as the 30 questions it will produce. */}
+                    <div className="mt-10">
+                      <SectionHead
+                        label="Mix"
+                        aside={
+                          <span
+                            className={`shrink-0 font-util text-[11px] uppercase tracking-[0.1em] tabular-nums ${
+                              total === QUESTIONS_PER_QUIZ ? 'text-muted' : 'text-hard'
+                            }`}
+                          >
+                            {total === QUESTIONS_PER_QUIZ
+                              ? '30 of 30 assigned'
+                              : `${remaining} still to assign`}
+                          </span>
+                        }
+                      />
+                      <div className="mt-5">
+                        <Tape tones={mixTones} label="Difficulty mix across the 30 questions" />
                       </div>
-                      <div className="mt-3 space-y-4">
-                        {SLIDERS.map(({ key, label, accent, dot }) => (
+
+                      <div className="mt-6 space-y-5">
+                        {SLIDERS.map(({ key, label, bar }) => (
                           <div key={key}>
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="flex items-center gap-2 text-gray-700">
-                                <span className={`h-2.5 w-2.5 rounded-full ${dot}`} />
+                            <div className="flex items-center justify-between">
+                              <span className="eyebrow flex items-center gap-2 text-ink">
+                                <span aria-hidden className={`h-3 w-[3px] ${bar}`} />
                                 {label}
                               </span>
-                              <span className="font-semibold text-gray-900">{split[key]}</span>
+                              <span className="font-util text-xs font-semibold tabular-nums text-ink">
+                                {split[key]}
+                              </span>
                             </div>
                             <input
                               type="range"
+                              aria-label={`${label} questions`}
                               min={0}
-                              max={30}
+                              max={QUESTIONS_PER_QUIZ}
                               value={split[key]}
                               onChange={(e) => setCount(key, e.target.valueAsNumber)}
-                              className={`mt-2 w-full cursor-pointer ${accent}`}
+                              className="mt-2.5 w-full cursor-pointer accent-signal"
                             />
                           </div>
                         ))}
@@ -259,61 +287,81 @@ export default function Dashboard() {
                       <button
                         onClick={generate}
                         disabled={!canGenerate}
-                        className="mt-6 w-full rounded-lg bg-indigo-600 py-3 font-semibold text-white shadow hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="btn btn-solid mt-8 w-full py-3.5"
                       >
-                        {generating ? 'Generating…' : 'Generate Test'}
+                        {generating ? 'Building your test…' : 'Start test'}
                       </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </section>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
-        <section className="mt-10">
-          <h2 className="text-lg font-semibold text-gray-900">Past quizzes</h2>
+      <section className="mt-16">
+        <SectionHead label="Past tests" />
 
-          {historyError && (
-            <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{historyError}</p>
-          )}
+        {historyError && (
+          <div className="mt-5">
+            <Notice>{historyError}</Notice>
+          </div>
+        )}
+        {history === null && !historyError && (
+          <div className="mt-5">
+            <Quiet>Loading past tests…</Quiet>
+          </div>
+        )}
+        {history?.length === 0 && (
+          <div className="mt-5">
+            <Quiet>Nothing here yet. Your first test will show up once you finish it.</Quiet>
+          </div>
+        )}
 
-          {history === null && !historyError && (
-            <p className="mt-3 text-sm text-gray-500">Loading history…</p>
-          )}
-
-          {history?.length === 0 && (
-            <p className="mt-3 text-sm text-gray-500">No quizzes yet — take your first quiz.</p>
-          )}
-
-          {history && history.length > 0 && (
-            <div className="mt-4 space-y-3">
-              {history.map((item) => (
-                <div
-                  key={item.quiz_id}
-                  className="flex flex-col gap-3 rounded-lg bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div>
-                    <p className="font-medium text-gray-900">{item.subject}</p>
-                    <p className="mt-1 text-sm text-gray-500">
-                      {new Date(item.completed_on).toLocaleDateString()} · Score{' '}
-                      {item.correct_answers}/{item.total_questions} ({Math.round(item.accuracy * 100)}%)
-                      · Easy {item.easy_questions} · Medium {item.medium_questions} · Hard{' '}
-                      {item.hard_questions} · {formatTime(item.total_time_taken)}
-                    </p>
+        {history && history.length > 0 && (
+          <ul className="mt-5">
+            {history.map((item) => (
+              <li
+                key={item.quiz_id}
+                className="flex flex-col gap-3 border-b border-rule py-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="font-display expanded font-bold tracking-tight text-ink">
+                    {item.subject}
+                  </p>
+                  {/* Aggregate, not per-question — so a solid proportion bar
+                      rather than the ordered tape used on a result. */}
+                  <div className="mt-2 flex items-center gap-3">
+                    <span
+                      aria-hidden
+                      className="h-1.5 w-24 overflow-hidden rounded-full bg-rule"
+                    >
+                      <span
+                        className="block h-full bg-signal"
+                        style={{ width: `${item.accuracy * 100}%` }}
+                      />
+                    </span>
+                    <span className="font-util text-xs tabular-nums text-ink">
+                      {item.correct_answers}/{item.total_questions}
+                    </span>
+                    <span className="font-util text-[11px] uppercase tracking-[0.1em] text-muted">
+                      {new Date(item.completed_on).toLocaleDateString()} ·{' '}
+                      {formatTime(item.total_time_taken)}
+                    </span>
                   </div>
-                  <Link
-                    to={`/quiz/${item.quiz_id}/review`}
-                    className="shrink-0 rounded-lg border border-indigo-200 px-4 py-2 text-center text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
-                  >
-                    View
-                  </Link>
                 </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </main>
-    </div>
+                <Link
+                  to={`/quiz/${item.quiz_id}/review`}
+                  className="btn btn-quiet shrink-0 px-4 py-2 text-center"
+                >
+                  Review
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </Shell>
   )
 }

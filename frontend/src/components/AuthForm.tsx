@@ -1,8 +1,10 @@
 import type { FormEvent, ReactNode } from 'react'
+import { Notice, Wordmark } from './Shell'
 
-// Shared card layout + submit/error handling for Login and Register.
+// Shared layout + submit/error handling for Login and Register.
 export function AuthCard({
   title,
+  standfirst,
   error,
   submitting,
   submitLabel,
@@ -11,6 +13,7 @@ export function AuthCard({
   children,
 }: {
   title: string
+  standfirst: string
   error: string | null
   submitting: boolean
   submitLabel: string
@@ -19,24 +22,24 @@ export function AuthCard({
   children: ReactNode
 }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-      <form onSubmit={onSubmit} className="w-full max-w-sm space-y-4 rounded-xl bg-white p-8 shadow">
-        <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
-        {error && (
-          <p role="alert" className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </p>
-        )}
-        {children}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded-lg bg-indigo-600 py-2 font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-        >
-          {submitting ? 'Please wait…' : submitLabel}
-        </button>
-        <p className="text-center text-sm text-gray-500">{footer}</p>
-      </form>
+    <div className="flex min-h-screen flex-col items-center justify-center px-6 py-16">
+      <div className="w-full max-w-sm">
+        <Wordmark />
+        <h1 className="mt-8 font-display expanded text-3xl font-extrabold leading-[1.05] tracking-tight text-ink">
+          {title}
+        </h1>
+        <p className="mt-3 text-[17px] leading-relaxed text-muted">{standfirst}</p>
+
+        <form onSubmit={onSubmit} className="mt-9 space-y-5">
+          {error && <Notice>{error}</Notice>}
+          {children}
+          <button type="submit" disabled={submitting} className="btn btn-solid w-full py-3">
+            {submitting ? 'Working…' : submitLabel}
+          </button>
+        </form>
+
+        <p className="mt-6 text-sm text-muted">{footer}</p>
+      </div>
     </div>
   )
 }
@@ -47,11 +50,20 @@ export function Field({
 }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
-      <span className="mb-1 block text-sm font-medium text-gray-700">{label}</span>
-      <input
-        {...inputProps}
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-      />
+      <span className="eyebrow mb-2 block">{label}</span>
+      <input {...inputProps} className="well w-full px-3 py-2.5 text-[15px] text-ink" />
+    </label>
+  )
+}
+
+export function Choice({
+  label,
+  ...selectProps
+}: { label: string } & React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <label className="block">
+      <span className="eyebrow mb-2 block">{label}</span>
+      <select {...selectProps} className="well w-full px-3 py-2.5 text-[15px] text-ink" />
     </label>
   )
 }

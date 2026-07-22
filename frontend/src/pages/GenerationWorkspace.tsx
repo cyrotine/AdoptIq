@@ -2,9 +2,10 @@
 // candidates -> review each (Accept publishes to the question bank, Reject
 // discards locally) -> Finish the session. Candidates live only in React state;
 // only accepted ones are ever stored (as a permanent question + a link row).
-import { useState } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useRef, useState } from 'react'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import Shell, { Notice, PageHead, Quiet, RailLink, SectionHead } from '../components/Shell'
 import {
   acceptCandidate,
   chat,
@@ -16,8 +17,17 @@ import {
   type GenerationSession,
 } from '../lib/api'
 
-// Per-card review outcome. Candidates have no id, so we key status by index.
+// Per-card review outcome.
 type CardStatus = 'pending' | 'accepting' | 'published' | 'duplicate' | 'rejected'
+
+// Candidates have no server id until they are accepted, and they now live in two
+// places — the batch list and inside chat turns — so each gets a local id on
+// arrival. Status is keyed by that id, never by position.
+type Reviewed = { id: number; candidate: Candidate }
+
+// A chat turn. Assistant turns carry any questions that turn produced, so they
+// render under the reply that asked for them instead of joining the batch above.
+type Turn = ChatMessage & { items?: Reviewed[] }
 
 const LETTERS = ['A', 'B', 'C', 'D'] as const
 
@@ -30,7 +40,7 @@ export default function GenerationWorkspace() {
     (useLocation().state as { topicName?: string } | null)?.topicName ?? `Topic ${topicId}`
 
   const [session, setSession] = useState<GenerationSession | null>(null)
-  const [candidates, setCandidates] = useState<Candidate[]>([])
+  const [candidates, setCandidates] = useState<Reviewed[]>([])
   const [status, setStatus] = useState<Record<number, CardStatus>>({})
   const [error, setError] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -40,9 +50,14 @@ export default function GenerationWorkspace() {
   const [moreCount, setMoreCount] = useState(5)
   const [moreElo, setMoreElo] = useState('') // '' -> reuse the session's target Elo
   const [generatingMore, setGeneratingMore] = useState(false)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<Turn[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatting, setChatting] = useState(false)
+
+  // Monotonic local ids. A ref, so tagging never depends on render order.
+  const nextId = useRef(0)
+  const tag = (cs: Candidate[]): Reviewed[] =>
+    cs.map((candidate) => ({ id: nextId.current++, candidate }))
 
   if (!admin) return null // AdminRoute guarantees admin; satisfy TS
 
@@ -57,7 +72,7 @@ export default function GenerationWorkspace() {
     try {
       const { session: s, candidates: c } = await createSession(data)
       setSession(s)
-      setCandidates(c)
+      setCandidates(tag(c))
       setStatus({})
     } catch (err) {
       setError(err instanceof Error ? err.message : 'generation failed')
@@ -66,26 +81,26 @@ export default function GenerationWorkspace() {
     }
   }
 
-  const onAccept = async (index: number) => {
+  const onAccept = async ({ id, candidate }: Reviewed) => {
     if (!session) return
-    setStatus((s) => ({ ...s, [index]: 'accepting' }))
+    setStatus((s) => ({ ...s, [id]: 'accepting' }))
     try {
-      await acceptCandidate(session.session_id, candidates[index])
-      setStatus((s) => ({ ...s, [index]: 'published' }))
+      await acceptCandidate(session.session_id, candidate)
+      setStatus((s) => ({ ...s, [id]: 'published' }))
     } catch (err) {
       const msg = err instanceof Error ? err.message : ''
       // The backend returns 409 { error: 'duplicate' } for an existing question.
-      if (msg === 'duplicate') setStatus((s) => ({ ...s, [index]: 'duplicate' }))
+      if (msg === 'duplicate') setStatus((s) => ({ ...s, [id]: 'duplicate' }))
       else {
-        setStatus((s) => ({ ...s, [index]: 'pending' }))
+        setStatus((s) => ({ ...s, [id]: 'pending' }))
         setError(msg || 'accept failed')
       }
     }
   }
 
-  const onReject = (index: number) => {
+  const onReject = ({ id }: Reviewed) => {
     // Client-side only — no request, nothing stored.
-    setStatus((s) => ({ ...s, [index]: 'rejected' }))
+    setStatus((s) => ({ ...s, [id]: 'rejected' }))
   }
 
   const onFinish = async () => {
@@ -100,8 +115,7 @@ export default function GenerationWorkspace() {
     }
   }
 
-  // Both iterative actions APPEND to the same candidates array so the index-keyed
-  // status map stays valid (new candidates default to 'pending').
+  // Generate More extends the batch above; chat questions stay in the thread.
   const onGenerateMore = async () => {
     if (!session) return
     setError('')
@@ -111,7 +125,7 @@ export default function GenerationWorkspace() {
         count: moreCount,
         targetElo: moreElo === '' ? undefined : Number(moreElo),
       })
-      setCandidates((cs) => [...cs, ...c])
+      setCandidates((cs) => [...cs, ...tag(c)])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'generate more failed')
     } finally {
@@ -123,14 +137,20 @@ export default function GenerationWorkspace() {
     e.preventDefault()
     if (!session || !chatInput.trim()) return
     setError('')
-    const next: ChatMessage[] = [...messages, { role: 'user', content: chatInput.trim() }]
+    const next: Turn[] = [...messages, { role: 'user', content: chatInput.trim() }]
     setMessages(next)
     setChatInput('')
     setChatting(true)
     try {
-      const { reply, candidates: c } = await chat(session.session_id, next)
-      setMessages((m) => [...m, { role: 'assistant', content: reply }])
-      if (c.length) setCandidates((cs) => [...cs, ...c])
+      // The API takes the plain transcript — local ids and items never go over.
+      const { reply, candidates: c } = await chat(
+        session.session_id,
+        next.map(({ role, content }) => ({ role, content })),
+      )
+      setMessages((m) => [
+        ...m,
+        { role: 'assistant', content: reply, items: c.length ? tag(c) : undefined },
+      ])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'chat failed')
     } finally {
@@ -138,243 +158,308 @@ export default function GenerationWorkspace() {
     }
   }
 
-  const visibleCandidates = candidates
-    .map((c, i) => ({ c, i }))
-    .filter(({ i }) => status[i] !== 'rejected')
+  const visible = (items: Reviewed[]) => items.filter((r) => status[r.id] !== 'rejected')
+  const visibleCandidates = visible(candidates)
+
+  const published = Object.values(status).filter((s) => s === 'published').length
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="flex items-center justify-between bg-white px-6 py-4 shadow-sm">
-        <span className="text-lg font-bold text-indigo-600">AdaptIQ · Generate</span>
-        <Link to="/admin" className="text-sm text-gray-500 hover:text-gray-900">
-          Back to Admin
-        </Link>
-      </header>
+    <Shell context="Generate" right={<RailLink to="/admin">Admin</RailLink>}>
+      <PageHead
+        title={topicName}
+        note="Upload the topic's notes, then review each candidate. Accepting publishes it to the question bank; rejecting drops it here and nowhere else."
+      />
 
-      <main className="mx-auto max-w-2xl px-6 py-10">
-        <h1 className="text-2xl font-bold text-gray-900">{topicName}</h1>
-        <p className="mt-2 text-gray-600">
-          Upload the topic's notes, then review each AI candidate. Accept publishes it
-          to the question bank; Reject discards it.
-        </p>
+      {error && (
+        <div className="mt-6">
+          <Notice>{error}</Notice>
+        </div>
+      )}
 
-        {error && (
-          <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>
-        )}
-
-        {/* Upload form — hidden once a session has been created. */}
-        {!session && (
-          <form onSubmit={onGenerate} className="mt-6 space-y-4 rounded-lg bg-white p-6 shadow">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Notes file</label>
+      {/* Upload form — hidden once a session has been created. */}
+      {!session && (
+        <form onSubmit={onGenerate} className="mt-10 space-y-6">
+          <div>
+            <label className="eyebrow mb-2 block" htmlFor="notes-file">
+              Notes file
+            </label>
+            <input
+              id="notes-file"
+              type="file"
+              name="file"
+              accept=".pdf,.txt,.md"
+              required
+              className="well w-full px-3 py-2.5 font-util text-xs text-ink file:mr-3 file:rounded file:border-0 file:bg-signal file:px-3 file:py-1.5 file:font-util file:text-xs file:font-semibold file:uppercase file:tracking-[0.1em] file:text-white"
+            />
+            <p className="eyebrow mt-2">Accepts .pdf, .txt or .md</p>
+          </div>
+          <div className="flex gap-4">
+            <label className="flex-1">
+              <span className="eyebrow mb-2 block">Target Elo 0–100</span>
               <input
-                type="file"
-                name="file"
-                accept=".pdf,.txt,.md"
+                type="number"
+                name="target_elo"
+                min={0}
+                max={100}
+                defaultValue={50}
                 required
-                className="mt-1 w-full text-sm text-gray-700"
+                className="well w-full px-3 py-2.5 font-util text-sm tabular-nums text-ink"
               />
-              <p className="mt-1 text-xs text-gray-400">.pdf, .txt, or .md</p>
-            </div>
-            <div className="flex gap-4">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700">Target Elo (0–100)</label>
+            </label>
+            <label className="flex-1">
+              <span className="eyebrow mb-2 block">How many 1–20</span>
+              <input
+                type="number"
+                name="count"
+                min={1}
+                max={20}
+                defaultValue={5}
+                required
+                className="well w-full px-3 py-2.5 font-util text-sm tabular-nums text-ink"
+              />
+            </label>
+          </div>
+          <button type="submit" disabled={generating} className="btn btn-solid w-full py-3.5">
+            {generating ? 'Reading the notes…' : 'Generate candidates'}
+          </button>
+        </form>
+      )}
+
+      {/* Empty state — session created but the model returned nothing usable. */}
+      {session && candidates.length === 0 && (
+        <div className="mt-8">
+          <Quiet>Nothing usable came back. Try a different file, or a smaller count.</Quiet>
+        </div>
+      )}
+
+      {/* Review cards. */}
+      {visibleCandidates.length > 0 && (
+        <div className="mt-12">
+          <SectionHead
+            label="Candidates"
+            aside={
+              <span className="shrink-0 font-util text-[11px] uppercase tracking-[0.1em] tabular-nums text-muted">
+                {published} published
+              </span>
+            }
+          />
+        </div>
+      )}
+
+      <div className="space-y-10">
+        {visibleCandidates.map((r, i) => (
+          <CandidateCard
+            key={r.id}
+            reviewed={r}
+            number={i + 1}
+            status={status[r.id] ?? 'pending'}
+            onAccept={onAccept}
+            onReject={onReject}
+          />
+        ))}
+      </div>
+
+      {/* Spec 15 — iterative controls, only while the session is active. */}
+      {session && !finished && (
+        <>
+          {/* Generate More — another batch, steered by accepted questions. */}
+          <div className="mt-16">
+            <SectionHead label="Generate more" />
+            <p className="mt-4 text-[15px] leading-relaxed text-muted">
+              Another batch from the same notes, steered by what you have accepted so far.
+            </p>
+            <div className="mt-5 flex flex-wrap items-end gap-4">
+              <label className="min-w-32 flex-1">
+                <span className="eyebrow mb-2 block">How many 1–20</span>
                 <input
                   type="number"
-                  name="target_elo"
-                  min={0}
-                  max={100}
-                  defaultValue={50}
-                  required
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-                />
-              </div>
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700">Count (1–20)</label>
-                <input
-                  type="number"
-                  name="count"
                   min={1}
                   max={20}
-                  defaultValue={5}
-                  required
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                  value={moreCount}
+                  onChange={(e) => setMoreCount(Number(e.target.value))}
+                  className="well w-full px-3 py-2.5 font-util text-sm tabular-nums text-ink"
                 />
-              </div>
+              </label>
+              <label className="min-w-32 flex-1">
+                <span className="eyebrow mb-2 block">Target Elo</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={moreElo}
+                  placeholder={String(session.target_elo)}
+                  onChange={(e) => setMoreElo(e.target.value)}
+                  className="well w-full px-3 py-2.5 font-util text-sm tabular-nums text-ink"
+                />
+              </label>
+              <button
+                onClick={onGenerateMore}
+                disabled={generatingMore}
+                className="btn btn-solid px-5 py-2.5"
+              >
+                {generatingMore ? 'Generating…' : 'Generate more'}
+              </button>
             </div>
-            <button
-              type="submit"
-              disabled={generating}
-              className="w-full rounded-lg bg-indigo-600 py-3 font-semibold text-white shadow hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {generating ? 'Generating…' : 'Generate candidates'}
-            </button>
-          </form>
-        )}
+          </div>
 
-        {/* Empty state — session created but the model returned nothing usable. */}
-        {session && candidates.length === 0 && (
-          <p className="mt-6 text-sm text-gray-500">
-            No candidates generated — try a different file or count.
-          </p>
-        )}
-
-        {/* Review cards. */}
-        {visibleCandidates.map(({ c, i }) => {
-          const st = status[i] ?? 'pending'
-          return (
-            <div key={i} className="mt-4 rounded-lg bg-white p-6 shadow">
-              <div className="flex items-start justify-between gap-4">
-                <p className="font-medium text-gray-900">{c.question_text}</p>
-                <span className="shrink-0 text-xs text-gray-400">Elo {c.elo_question}</span>
-              </div>
-              <ul className="mt-3 space-y-1 text-sm">
-                {LETTERS.map((letter) => {
-                  const isCorrect = c.correct_answer === letter
+          {/* Chat — grounded in the uploaded notes; can also author questions. */}
+          <div className="mt-16">
+            <SectionHead label="Ask about these notes" />
+            <p className="mt-4 text-[15px] leading-relaxed text-muted">
+              Ask what the notes cover, or ask for questions — “three harder ones on
+              stoichiometry”.
+            </p>
+            {messages.length > 0 && (
+              <div className="mt-6 space-y-6">
+                {messages.map((m, i) => {
+                  const items = m.items ? visible(m.items) : []
                   return (
-                    <li
-                      key={letter}
-                      className={isCorrect ? 'font-semibold text-green-700' : 'text-gray-700'}
-                    >
-                      {letter}. {c[`option_${letter.toLowerCase()}` as keyof Candidate] as string}
-                      {isCorrect && ' ✓'}
-                    </li>
+                    <div key={i}>
+                      <div
+                        className={`border-l-2 pl-4 ${
+                          m.role === 'user' ? 'border-signal' : 'border-rule'
+                        }`}
+                      >
+                        <p className="eyebrow">{m.role === 'user' ? 'You' : 'AdaptIQ'}</p>
+                        <p className="mt-1.5 text-[15px] leading-relaxed text-ink">{m.content}</p>
+                      </div>
+
+                      {/* Questions this turn wrote, under the turn that wrote them. */}
+                      {items.length > 0 && (
+                        <div className="mt-5 space-y-8 border-l-2 border-rule pl-4">
+                          <p className="eyebrow">
+                            {items.length} question{items.length > 1 ? 's' : ''} from this reply
+                          </p>
+                          {items.map((r, n) => (
+                            <CandidateCard
+                              key={r.id}
+                              reviewed={r}
+                              number={n + 1}
+                              status={status[r.id] ?? 'pending'}
+                              onAccept={onAccept}
+                              onReject={onReject}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )
                 })}
-              </ul>
-              <p className="mt-3 text-sm text-gray-500">{c.explanation}</p>
-
-              <div className="mt-4 flex items-center gap-3">
-                {st === 'published' && (
-                  <span className="text-sm font-semibold text-green-700">Published ✓</span>
-                )}
-                {st === 'duplicate' && (
-                  <span className="text-sm font-semibold text-amber-600">
-                    Duplicate — already in the bank
-                  </span>
-                )}
-                {(st === 'pending' || st === 'accepting') && (
-                  <>
-                    <button
-                      onClick={() => onAccept(i)}
-                      disabled={st === 'accepting'}
-                      className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow hover:bg-indigo-700 disabled:opacity-50"
-                    >
-                      {st === 'accepting' ? 'Accepting…' : 'Accept'}
-                    </button>
-                    <button
-                      onClick={() => onReject(i)}
-                      disabled={st === 'accepting'}
-                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      Reject
-                    </button>
-                  </>
+                {chatting && (
+                  <div className="border-l-2 border-rule pl-4">
+                    <p className="eyebrow">AdaptIQ</p>
+                    <p className="mt-1.5 text-[15px] text-muted">Reading the notes…</p>
+                  </div>
                 )}
               </div>
-            </div>
+            )}
+            <form onSubmit={onSendChat} className="mt-6 flex gap-3">
+              <input
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Ask about the notes…"
+                aria-label="Ask about the notes"
+                className="well flex-1 px-3 py-2.5 text-[15px] text-ink"
+              />
+              <button
+                type="submit"
+                disabled={chatting || !chatInput.trim()}
+                className="btn btn-solid px-5 py-2.5"
+              >
+                {chatting ? 'Sending…' : 'Send'}
+              </button>
+            </form>
+          </div>
+
+          <button onClick={onFinish} className="btn btn-quiet mt-16 w-full py-3.5">
+            Finish session
+          </button>
+        </>
+      )}
+      {finished && (
+        <p className="mt-8 border-l-2 border-easy pl-4 font-util text-xs uppercase tracking-[0.1em] text-easy">
+          Saved. Taking you back to the topic list…
+        </p>
+      )}
+    </Shell>
+  )
+}
+
+// One reviewable question. Identical whether it came from the notes batch or
+// from a chat reply, so the review action means the same thing in both places.
+function CandidateCard({
+  reviewed,
+  number,
+  status,
+  onAccept,
+  onReject,
+}: {
+  reviewed: Reviewed
+  number: number
+  status: CardStatus
+  onAccept: (r: Reviewed) => void
+  onReject: (r: Reviewed) => void
+}) {
+  const c = reviewed.candidate
+  return (
+    <article>
+      <div className="flex items-baseline justify-between gap-4">
+        <span className="font-util text-xs font-semibold tabular-nums text-muted">
+          {String(number).padStart(2, '0')}
+        </span>
+        <span className="font-util text-[11px] uppercase tracking-[0.1em] tabular-nums text-muted">
+          Elo {c.elo_question}
+        </span>
+      </div>
+      <p className="mt-2 text-[17px] leading-relaxed text-ink">{c.question_text}</p>
+
+      <ul className="mt-4 space-y-1.5">
+        {LETTERS.map((letter) => {
+          const isCorrect = c.correct_answer === letter
+          return (
+            <li
+              key={letter}
+              className={`flex items-baseline gap-3 rounded-md border-l-2 px-3 py-2 text-[15px] ${
+                isCorrect ? 'border-easy bg-easy/5 text-ink' : 'border-rule text-muted'
+              }`}
+            >
+              <span className="font-util text-xs font-semibold">{letter}</span>
+              <span className="grow">
+                {c[`option_${letter.toLowerCase()}` as keyof Candidate] as string}
+              </span>
+              {isCorrect && <span className="eyebrow shrink-0 text-easy">Correct</span>}
+            </li>
           )
         })}
+      </ul>
 
-        {/* Spec 15 — iterative controls, only while the session is active. */}
-        {session && !finished && (
+      <div className="mt-5 border-l-2 border-signal pl-4">
+        <p className="eyebrow">Why</p>
+        <p className="mt-1.5 text-[15px] leading-relaxed text-muted">{c.explanation}</p>
+      </div>
+
+      <div className="mt-5 flex items-center gap-3">
+        {status === 'published' && <span className="eyebrow text-easy">Published</span>}
+        {status === 'duplicate' && <span className="eyebrow text-medium">Already in the bank</span>}
+        {(status === 'pending' || status === 'accepting') && (
           <>
-            {/* Generate More — another batch, steered by accepted questions. */}
-            <div className="mt-6 rounded-lg bg-white p-6 shadow">
-              <h2 className="font-semibold text-gray-900">Generate more</h2>
-              <p className="mt-1 text-sm text-gray-500">
-                Another batch from the same notes, steered by the questions you've accepted.
-              </p>
-              <div className="mt-3 flex items-end gap-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700">Count (1–20)</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={moreCount}
-                    onChange={(e) => setMoreCount(Number(e.target.value))}
-                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-                  />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700">
-                    Target Elo (optional)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={moreElo}
-                    placeholder={String(session.target_elo)}
-                    onChange={(e) => setMoreElo(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-                  />
-                </div>
-                <button
-                  onClick={onGenerateMore}
-                  disabled={generatingMore}
-                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white shadow hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {generatingMore ? 'Generating…' : 'Generate more'}
-                </button>
-              </div>
-            </div>
-
-            {/* Chat — grounded in the uploaded notes; can also author questions. */}
-            <div className="mt-6 rounded-lg bg-white p-6 shadow">
-              <h2 className="font-semibold text-gray-900">Chat about these notes</h2>
-              <p className="mt-1 text-sm text-gray-500">
-                Ask about the notes, or ask for questions (e.g. "give me 3 harder ones on X").
-              </p>
-              {messages.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {messages.map((m, i) => (
-                    <p
-                      key={i}
-                      className={
-                        m.role === 'user'
-                          ? 'rounded-lg bg-indigo-50 p-3 text-sm text-gray-800'
-                          : 'rounded-lg bg-gray-50 p-3 text-sm text-gray-700'
-                      }
-                    >
-                      <span className="font-semibold">{m.role === 'user' ? 'You' : 'AI'}: </span>
-                      {m.content}
-                    </p>
-                  ))}
-                </div>
-              )}
-              <form onSubmit={onSendChat} className="mt-3 flex gap-3">
-                <input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask about the notes…"
-                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  disabled={chatting || !chatInput.trim()}
-                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white shadow hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {chatting ? 'Sending…' : 'Send'}
-                </button>
-              </form>
-            </div>
-
             <button
-              onClick={onFinish}
-              className="mt-6 w-full rounded-lg border border-gray-300 py-3 font-semibold text-gray-700 hover:bg-gray-50"
+              onClick={() => onAccept(reviewed)}
+              disabled={status === 'accepting'}
+              className="btn btn-solid px-4 py-2"
             >
-              Save session
+              {status === 'accepting' ? 'Publishing…' : 'Accept'}
+            </button>
+            <button
+              onClick={() => onReject(reviewed)}
+              disabled={status === 'accepting'}
+              className="btn btn-quiet px-4 py-2"
+            >
+              Reject
             </button>
           </>
         )}
-        {finished && (
-          <p className="mt-6 rounded-lg bg-green-50 px-4 py-3 text-sm font-medium text-green-700">
-            Questions saved — redirecting to dashboard…
-          </p>
-        )}
-      </main>
-    </div>
+      </div>
+    </article>
   )
 }

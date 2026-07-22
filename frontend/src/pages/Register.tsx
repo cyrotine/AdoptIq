@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { AuthCard, Field } from '../components/AuthForm'
+import { AuthCard, Choice, Field } from '../components/AuthForm'
 
 export default function Register() {
   const { register } = useAuth()
@@ -32,14 +32,18 @@ export default function Register() {
 
   return (
     <AuthCard
-      title="Create your account"
+      title="Get placed on the scale"
+      standfirst="Two minutes to set up. Your first quiz is built around where you actually are."
       error={error}
       submitting={submitting}
-      submitLabel="Register"
+      submitLabel="Create account"
       onSubmit={onSubmit}
       footer={
         <>
-          Already have an account? <Link to="/login" className="text-indigo-600 hover:underline">Log in</Link>
+          Already have an account?{' '}
+          <Link to="/login" className="font-medium text-signal underline underline-offset-4">
+            Log in
+          </Link>
         </>
       }
     >
@@ -47,17 +51,10 @@ export default function Register() {
       <Field label="Username" name="username" required minLength={3} maxLength={30} pattern="[a-zA-Z0-9_]+" title="Letters, numbers and underscore only" />
       <Field label="Email" name="email" type="email" required maxLength={100} />
       <Field label="Password" name="password" type="password" required minLength={8} />
-      <label className="block">
-        <span className="mb-1 block text-sm font-medium text-gray-700">Class</span>
-        <select
-          name="class"
-          required
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
-        >
-          <option value="9">Class 9</option>
-          <option value="10">Class 10</option>
-        </select>
-      </label>
+      <Choice label="Class" name="class" required>
+        <option value="9">Class 9</option>
+        <option value="10">Class 10</option>
+      </Choice>
     </AuthCard>
   )
 }

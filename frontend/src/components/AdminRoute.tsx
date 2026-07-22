@@ -7,7 +7,11 @@ export default function AdminRoute() {
   const { admin, loading } = useAuth()
 
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center text-gray-500">Loading…</div>
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <span className="eyebrow">Checking your session</span>
+      </div>
+    )
   }
   if (!admin) return <Navigate to="/login" replace />
   return <Outlet />
