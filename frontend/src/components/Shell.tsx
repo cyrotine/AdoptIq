@@ -1,7 +1,10 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import Ambient from './Ambient'
+import { Enter } from './Motion'
 
-// The wordmark carries the same graduation motif as every tape in the app.
+// The wordmark carries the same graduation motif as every tape in the app —
+// the centre tick is the lit one.
 export function Wordmark({ context }: { context?: string }) {
   return (
     <span className="flex items-baseline gap-2.5">
@@ -11,7 +14,7 @@ export function Wordmark({ context }: { context?: string }) {
       <span aria-hidden className="flex items-end gap-[3px] pb-px">
         <span className="h-1.5 w-0.5 bg-rule" />
         <span className="h-2.5 w-0.5 bg-rule" />
-        <span className="h-4 w-0.5 bg-signal" />
+        <span className="tick-lit h-4 w-0.5 bg-signal text-signal" />
         <span className="h-2.5 w-0.5 bg-rule" />
         <span className="h-1.5 w-0.5 bg-rule" />
       </span>
@@ -20,7 +23,8 @@ export function Wordmark({ context }: { context?: string }) {
   )
 }
 
-// Shared page frame: a slim instrument rail over a single reading column.
+// Shared page frame: a glass instrument rail floating over the void.
+// The rail is blur budget surface #1 of 2.
 export default function Shell({
   context,
   right,
@@ -38,7 +42,8 @@ export default function Shell({
 }) {
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-10 bg-face">
+      <Ambient />
+      <header className="glass sticky top-0 z-10 border-b border-rule">
         <div
           className={`mx-auto flex ${wide ? 'max-w-3xl' : 'max-w-2xl'} items-center justify-between gap-4 px-6 py-3.5`}
         >
@@ -48,18 +53,19 @@ export default function Shell({
         {rail && (
           <div className={`mx-auto ${wide ? 'max-w-3xl' : 'max-w-2xl'} px-6 pb-3`}>{rail}</div>
         )}
-        <div className="rule" />
       </header>
-      <main className={`mx-auto ${wide ? 'max-w-3xl' : 'max-w-2xl'} px-6 pb-20 pt-10`}>
-        {children}
-      </main>
+      <Enter>
+        <main className={`mx-auto ${wide ? 'max-w-3xl' : 'max-w-2xl'} px-6 pb-20 pt-10`}>
+          {children}
+        </main>
+      </Enter>
     </div>
   )
 }
 
 export function RailLink({ to, children }: { to: string; children: ReactNode }) {
   return (
-    <Link to={to} className="eyebrow hover:text-signal">
+    <Link to={to} className="eyebrow transition-colors hover:text-signal">
       {children}
     </Link>
   )
@@ -67,7 +73,7 @@ export function RailLink({ to, children }: { to: string; children: ReactNode }) 
 
 export function RailButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
   return (
-    <button onClick={onClick} className="eyebrow hover:text-signal">
+    <button onClick={onClick} className="eyebrow cursor-pointer transition-colors hover:text-signal">
       {children}
     </button>
   )
@@ -77,15 +83,15 @@ export function RailButton({ onClick, children }: { onClick: () => void; childre
 export function PageHead({ title, note }: { title: string; note?: ReactNode }) {
   return (
     <>
-      <h1 className="font-display expanded text-3xl font-extrabold leading-[1.05] tracking-tight text-ink">
+      <h1 className="font-display expanded text-3xl font-extrabold leading-[1.05] tracking-tight text-ink sm:text-4xl">
         {title}
       </h1>
-      {note && <p className="mt-3 max-w-prose text-[17px] leading-relaxed text-muted">{note}</p>}
+      {note && <p className="mt-3 max-w-prose text-[16px] leading-relaxed text-muted">{note}</p>}
     </>
   )
 }
 
-// Section heading engraved into the plate: label, hairline, optional control.
+// Section heading: label, hairline, optional control.
 export function SectionHead({ label, aside }: { label: string; aside?: ReactNode }) {
   return (
     <div className="flex items-center gap-4">
@@ -100,14 +106,14 @@ export function Notice({ children }: { children: ReactNode }) {
   return (
     <p
       role="alert"
-      className="border-l-2 border-hard bg-hard/5 px-4 py-3 font-util text-xs leading-relaxed text-hard"
+      className="rounded-r-lg border-l-2 border-hard bg-hard/10 px-4 py-3 font-util text-xs leading-relaxed text-hard"
     >
       {children}
     </p>
   )
 }
 
-// Loading and empty both get the same quiet treatment — a mono line, no spinner.
+// Quiet one-liner for inline empty notes (fetch loading uses Skeleton now).
 export function Quiet({ children }: { children: ReactNode }) {
   return <p className="font-util text-xs text-muted">{children}</p>
 }

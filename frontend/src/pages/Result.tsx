@@ -9,7 +9,7 @@ export default function Result() {
 
   return (
     <Shell context="Result" right={<RailLink to="/">Dashboard</RailLink>}>
-      <ResultSummary result={result} />
+      <ResultSummary result={result} celebrate />
       <Link to="/" className="btn btn-solid mt-12 block py-3.5 text-center">
         Back to dashboard
       </Link>

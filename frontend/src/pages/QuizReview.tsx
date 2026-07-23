@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import type { SubmitResponse } from '../lib/quiz'
-import Shell, { Notice, Quiet, RailLink } from '../components/Shell'
+import Shell, { Notice, RailLink } from '../components/Shell'
 import ResultSummary from '../components/ResultSummary'
+import { Skeleton } from '../components/ui'
 
 export default function QuizReview() {
   const { quizId } = useParams()
@@ -20,7 +21,13 @@ export default function QuizReview() {
   return (
     <Shell context="Past test" right={<RailLink to="/">Dashboard</RailLink>}>
       {error && <Notice>{error}</Notice>}
-      {!result && !error && <Quiet>Loading this test…</Quiet>}
+      {!result && !error && (
+        <div className="space-y-6">
+          <Skeleton className="h-16 w-40" />
+          <Skeleton className="h-7 w-full" />
+          <Skeleton className="h-28 w-full" />
+        </div>
+      )}
       {result && (
         <>
           <ResultSummary result={result} />

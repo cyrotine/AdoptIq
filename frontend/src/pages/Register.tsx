@@ -48,9 +48,25 @@ export default function Register() {
       }
     >
       <Field label="Full name" name="name" required autoFocus maxLength={100} />
-      <Field label="Username" name="username" required minLength={3} maxLength={30} pattern="[a-zA-Z0-9_]+" title="Letters, numbers and underscore only" />
+      <Field
+        label="Username"
+        name="username"
+        required
+        minLength={3}
+        maxLength={30}
+        pattern="[a-zA-Z0-9_]+"
+        title="Letters, numbers and underscore only"
+        hint="Letters, numbers and underscore · 3–30 characters"
+      />
       <Field label="Email" name="email" type="email" required maxLength={100} />
-      <Field label="Password" name="password" type="password" required minLength={8} />
+      <Field
+        label="Password"
+        name="password"
+        type="password"
+        required
+        minLength={8}
+        hint="At least 8 characters"
+      />
       <Choice label="Class" name="class" required>
         <option value="9">Class 9</option>
         <option value="10">Class 10</option>

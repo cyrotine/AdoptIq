@@ -7,9 +7,9 @@ const OPTIONS: Answer[] = ['A', 'B', 'C', 'D']
 // three answer states (Spec 06) survive without colour.
 function optionMark(r: QuestionResult, opt: Answer) {
   if (opt === r.correct_answer)
-    return { edge: 'border-easy bg-easy/5 text-ink', note: 'Correct answer', tone: 'text-easy' }
+    return { edge: 'border-easy bg-easy/10 text-ink', note: 'Correct answer', tone: 'text-easy' }
   if (opt === r.student_answer)
-    return { edge: 'border-hard bg-hard/5 text-ink', note: 'You picked this', tone: 'text-hard' }
+    return { edge: 'border-hard bg-hard/10 text-ink', note: 'You picked this', tone: 'text-hard' }
   return { edge: 'border-rule text-muted', note: '', tone: '' }
 }
 
@@ -21,11 +21,11 @@ function verdictOf(r: QuestionResult) {
 
 export default function QuestionReview({ results }: { results: QuestionResult[] }) {
   return (
-    <div className="mt-6 space-y-10">
+    <div className="mt-6 space-y-6">
       {results.map((r, i) => {
         const verdict = verdictOf(r)
         return (
-          <article key={r.question_id}>
+          <article key={r.question_id} className="pane px-5 py-5 sm:px-6">
             {/* The number matches this question's tick on the score tape above. */}
             <div className="flex items-baseline justify-between gap-4">
               <span className={`font-util text-xs font-semibold tabular-nums ${verdict.tone}`}>
@@ -37,7 +37,9 @@ export default function QuestionReview({ results }: { results: QuestionResult[] 
             <p className="eyebrow mt-3">
               {r.chapter_name} · {r.topic_name}
             </p>
-            <p className="mt-2 text-[17px] leading-relaxed text-ink">{r.question_text}</p>
+            <p className="mt-2 font-read text-[17px] leading-relaxed text-ink">
+              {r.question_text}
+            </p>
 
             <ul className="mt-4 space-y-1.5">
               {OPTIONS.map((opt) => {
@@ -70,7 +72,9 @@ export default function QuestionReview({ results }: { results: QuestionResult[] 
             {r.explanation && (
               <div className="mt-5 border-l-2 border-signal pl-4">
                 <p className="eyebrow">Why</p>
-                <p className="mt-1.5 text-[15px] leading-relaxed text-muted">{r.explanation}</p>
+                <p className="mt-1.5 font-read text-[15px] leading-relaxed text-muted">
+                  {r.explanation}
+                </p>
               </div>
             )}
           </article>

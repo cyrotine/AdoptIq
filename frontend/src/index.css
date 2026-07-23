@@ -1,26 +1,34 @@
 @import "tailwindcss";
 
-/* ── Calibration ───────────────────────────────────────────────────────────
+/* ── Night Instrument ──────────────────────────────────────────────────────
    AdaptIQ measures a student on a 0–100 scale and serves 30 questions at a
-   chosen mix. The interface is dressed as the instrument that does the
-   measuring: a machined steel face, engraved hairlines instead of floating
-   cards, and graduated tick marks that always stand for real counts.
+   chosen mix. The interface is the instrument that does the measuring, now
+   read at night: a deep blue-black void, glass panes on a strict blur
+   budget, and luminous graduations. Every mark still stands for a real
+   count — glow is reserved for live readings, never decoration.
+
+   Token names are kept from the previous theme so every existing class
+   re-lights without edits:
+     face  → the void (app background)     signal      → iris accent
+     raise → lifted surface                signal-soft → iris wash
    ------------------------------------------------------------------------ */
 
 @theme {
-  --color-face: #e6e9ed; /* the plate everything is engraved into */
-  --color-raise: #f2f4f6; /* raised panels */
-  --color-ink: #10141a;
-  --color-muted: #4e5866;
-  --color-rule: #c7cdd5; /* graduations + hairlines */
-  --color-signal: #17346b; /* ink blue — needles, focus, primary action */
-  --color-signal-soft: #dde3f1;
+  --color-face: #0a0d16; /* the void everything floats over */
+  --color-pane: #111624; /* glass panes, cards */
+  --color-raise: #1a2135; /* raised / hover surface */
+  --color-ink: #eef1f8;
+  --color-muted: #98a0b3;
+  --color-rule: rgba(255, 255, 255, 0.12); /* hairlines + unlit marks */
+  --color-signal: #8a93ff; /* iris — needles, focus, links, lit marks */
+  --color-signal-deep: #4f46e5; /* gradient stop, pressed states */
+  --color-signal-soft: rgba(138, 147, 255, 0.14);
+  --color-ember: #f5b84a; /* warm counterpoint: streaks, highlights */
 
-  /* Difficulty stops. Darkened from the Tailwind defaults so every one of
-     them clears 4.5:1 as text on --color-face. */
-  --color-easy: #26654b;
-  --color-medium: #8a5e0a;
-  --color-hard: #a8342b;
+  /* Difficulty stops, tuned so each clears 4.5:1 as text on --color-face. */
+  --color-easy: #3ecf8e;
+  --color-medium: #f5b84a;
+  --color-hard: #f4638b;
 
   --font-display: "Archivo", ui-sans-serif, system-ui, sans-serif;
   --font-read: "Newsreader", ui-serif, Georgia, serif;
@@ -31,7 +39,8 @@
   body {
     background: var(--color-face);
     color: var(--color-ink);
-    font-family: var(--font-read);
+    /* Archivo is the UI voice; long-form reading opts into font-read. */
+    font-family: var(--font-display);
     -webkit-font-smoothing: antialiased;
   }
 
@@ -42,17 +51,17 @@
 
   ::selection {
     background: var(--color-signal);
-    color: #fff;
+    color: var(--color-face);
   }
 }
 
 @layer components {
-  /* Archivo's width axis. Wide enough to read as signage, not as a headline. */
+  /* Archivo's width axis. Wide enough to read as signage, not a headline. */
   .expanded {
     font-variation-settings: "wdth" 118;
   }
 
-  /* Small caps-ish label used for every field label, section head and legend. */
+  /* Mono label used for every field label, section head and legend. */
   .eyebrow {
     font-family: var(--font-util);
     font-size: 0.6875rem;
@@ -63,29 +72,38 @@
     color: var(--color-muted);
   }
 
-  /* Engraved separator: dark line, light line under it. */
+  /* Hairline separator. */
   .rule {
     height: 1px;
     background: var(--color-rule);
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9);
   }
 
-  /* A raised section of the plate. Replaces the card + drop shadow. */
-  .plate {
-    background: var(--color-raise);
+  /* A floating glass pane — the one elevation above the void. */
+  .pane {
+    background: var(--color-pane);
+    border: 1px solid var(--color-rule);
+    border-radius: 14px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  /* Recessed — inputs and anything holding a value. */
+  .well {
+    background: #0d1220;
     border: 1px solid var(--color-rule);
     border-radius: 10px;
-    box-shadow:
-      inset 0 1px 0 #fff,
-      0 1px 0 rgba(255, 255, 255, 0.7);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+    transition: border-color 0.15s;
+  }
+  .well:focus-within,
+  .well:focus {
+    border-color: var(--color-signal);
   }
 
-  /* Recessed — used for inputs and for anything holding a value. */
-  .well {
-    background: #fbfcfd;
-    border: 1px solid var(--color-rule);
-    border-radius: 8px;
-    box-shadow: inset 0 1px 2px rgba(16, 20, 26, 0.06);
+  /* Blur budget: at most two .glass surfaces per viewport (rail + one). */
+  .glass {
+    background: color-mix(in srgb, var(--color-face) 72%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
   }
 
   .btn {
@@ -94,11 +112,16 @@
     font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    border-radius: 8px;
+    border-radius: 10px;
     transition:
       background 0.15s,
       color 0.15s,
-      border-color 0.15s;
+      border-color 0.15s,
+      box-shadow 0.15s,
+      transform 0.1s;
+  }
+  .btn:not(:disabled):active {
+    transform: scale(0.98);
   }
   .btn:disabled {
     opacity: 0.4;
@@ -106,12 +129,14 @@
   }
 
   .btn-solid {
-    background: var(--color-signal);
+    background: linear-gradient(135deg, #6366f1, var(--color-signal-deep));
     color: #fff;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
   }
   .btn-solid:not(:disabled):hover {
-    background: #0f2650;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      0 0 20px rgba(99, 102, 241, 0.35);
   }
 
   .btn-quiet {
@@ -123,10 +148,74 @@
     background: var(--color-signal-soft);
     border-color: var(--color-signal);
   }
+
+  /* Keyboard hint chip. */
+  .key {
+    font-family: var(--font-util);
+    font-size: 0.625rem;
+    line-height: 1;
+    padding: 4px 6px;
+    border-radius: 5px;
+    border: 1px solid var(--color-rule);
+    border-bottom-width: 2px;
+    background: var(--color-pane);
+    color: var(--color-muted);
+  }
+
+  /* Loading placeholder with a moving highlight. */
+  .skeleton {
+    border-radius: 10px;
+    background: linear-gradient(
+      100deg,
+      var(--color-pane) 40%,
+      var(--color-raise) 50%,
+      var(--color-pane) 60%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.4s linear infinite;
+  }
+
+  /* A luminous mark: glow drawn from the mark's own colour. */
+  .tick-lit {
+    box-shadow: 0 0 10px color-mix(in srgb, currentColor 55%, transparent);
+  }
+
+  /* The live reading breathes. */
+  .breathe {
+    animation: breathe 2s ease-in-out infinite;
+  }
+
+  /* ── Ambient backdrop (see Ambient.tsx) ── */
+  .orb {
+    position: absolute;
+    width: 65vmax;
+    height: 65vmax;
+    border-radius: 50%;
+    animation: drift 46s ease-in-out infinite alternate;
+  }
+  .orb-iris {
+    top: -22vmax;
+    left: -16vmax;
+    background: radial-gradient(circle, rgba(138, 147, 255, 0.1), transparent 62%);
+  }
+  .orb-ember {
+    bottom: -26vmax;
+    right: -18vmax;
+    background: radial-gradient(circle, rgba(245, 184, 74, 0.06), transparent 62%);
+    animation-duration: 54s;
+    animation-direction: alternate-reverse;
+  }
+  .gridlines {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9), transparent 75%);
+    -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9), transparent 75%);
+  }
 }
 
-/* The score tape reveals left to right — the one orchestrated moment in the
-   app, on the page where the measurement lands. */
+/* The score tape reveals left to right on the result page. */
 @keyframes tick-in {
   from {
     transform: scaleY(0.2);
@@ -135,6 +224,50 @@
   to {
     transform: scaleY(1);
     opacity: 1;
+  }
+}
+
+@keyframes drift {
+  to {
+    transform: translate3d(6vmax, 4vmax, 0) scale(1.08);
+  }
+}
+
+/* Result-page celebration ticks (see ResultSummary.tsx). */
+@keyframes burst {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-90px);
+    opacity: 0;
+  }
+}
+
+/* The calibration overlay's progress sweep (see AuthForm.tsx). */
+@keyframes calibrate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 6px color-mix(in srgb, currentColor 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 16px color-mix(in srgb, currentColor 75%, transparent);
   }
 }
 

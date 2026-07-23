@@ -4,8 +4,11 @@
 // only accepted ones are ever stored (as a permanent question + a link row).
 import { useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { AnimatePresence, motion } from 'framer-motion'
+import { Check, CheckCircle2, Sparkles, UploadCloud, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import Shell, { Notice, PageHead, Quiet, RailLink, SectionHead } from '../components/Shell'
+import { Skeleton } from '../components/ui'
 import {
   acceptCandidate,
   chat,
@@ -45,6 +48,9 @@ export default function GenerationWorkspace() {
   const [error, setError] = useState('')
   const [generating, setGenerating] = useState(false)
   const [finished, setFinished] = useState(false)
+
+  // Display-only: the chosen file's name inside the drop-zone.
+  const [fileName, setFileName] = useState('')
 
   // Spec 15 — Generate More + grounded chat, both only while the session is active.
   const [moreCount, setMoreCount] = useState(5)
@@ -179,20 +185,21 @@ export default function GenerationWorkspace() {
       {/* Upload form — hidden once a session has been created. */}
       {!session && (
         <form onSubmit={onGenerate} className="mt-10 space-y-6">
-          <div>
-            <label className="eyebrow mb-2 block" htmlFor="notes-file">
-              Notes file
-            </label>
+          <label className="pane flex cursor-pointer flex-col items-center gap-3 !border-dashed px-6 py-10 text-center transition-colors duration-150 focus-within:!border-signal hover:!border-signal/50">
+            <UploadCloud aria-hidden size={28} strokeWidth={1.5} className="text-signal" />
+            <span className="text-[15px] text-ink">
+              {fileName || 'Choose the notes file for this topic'}
+            </span>
+            <span className="eyebrow">Accepts .pdf, .txt or .md</span>
             <input
-              id="notes-file"
               type="file"
               name="file"
               accept=".pdf,.txt,.md"
               required
-              className="well w-full px-3 py-2.5 font-util text-xs text-ink file:mr-3 file:rounded file:border-0 file:bg-signal file:px-3 file:py-1.5 file:font-util file:text-xs file:font-semibold file:uppercase file:tracking-[0.1em] file:text-white"
+              onChange={(e) => setFileName(e.target.files?.[0]?.name ?? '')}
+              className="sr-only"
             />
-            <p className="eyebrow mt-2">Accepts .pdf, .txt or .md</p>
-          </div>
+          </label>
           <div className="flex gap-4">
             <label className="flex-1">
               <span className="eyebrow mb-2 block">Target Elo 0–100</span>
@@ -203,7 +210,7 @@ export default function GenerationWorkspace() {
                 max={100}
                 defaultValue={50}
                 required
-                className="well w-full px-3 py-2.5 font-util text-sm tabular-nums text-ink"
+                className="well w-full px-3 py-2.5 font-util text-sm tabular-nums text-ink outline-none"
               />
             </label>
             <label className="flex-1">
@@ -215,13 +222,19 @@ export default function GenerationWorkspace() {
                 max={20}
                 defaultValue={5}
                 required
-                className="well w-full px-3 py-2.5 font-util text-sm tabular-nums text-ink"
+                className="well w-full px-3 py-2.5 font-util text-sm tabular-nums text-ink outline-none"
               />
             </label>
           </div>
           <button type="submit" disabled={generating} className="btn btn-solid w-full py-3.5">
             {generating ? 'Reading the notes…' : 'Generate candidates'}
           </button>
+          {generating && (
+            <div className="space-y-3" aria-hidden>
+              <Skeleton className="h-24" />
+              <Skeleton className="h-24" />
+            </div>
+          )}
         </form>
       )}
 
@@ -246,17 +259,24 @@ export default function GenerationWorkspace() {
         </div>
       )}
 
-      <div className="space-y-10">
-        {visibleCandidates.map((r, i) => (
-          <CandidateCard
-            key={r.id}
-            reviewed={r}
-            number={i + 1}
-            status={status[r.id] ?? 'pending'}
-            onAccept={onAccept}
-            onReject={onReject}
-          />
-        ))}
+      <div className="mt-6 space-y-6">
+        <AnimatePresence initial={false}>
+          {visibleCandidates.map((r, i) => (
+            <motion.div
+              key={r.id}
+              exit={{ opacity: 0, scale: 0.98 }}
+              transition={{ duration: 0.15 }}
+            >
+              <CandidateCard
+                reviewed={r}
+                number={i + 1}
+                status={status[r.id] ?? 'pending'}
+                onAccept={onAccept}
+                onReject={onReject}
+              />
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
 
       {/* Spec 15 — iterative controls, only while the session is active. */}
@@ -277,7 +297,7 @@ export default function GenerationWorkspace() {
                   max={20}
                   value={moreCount}
                   onChange={(e) => setMoreCount(Number(e.target.value))}
-                  className="well w-full px-3 py-2.5 font-util text-sm tabular-nums text-ink"
+                  className="well w-full px-3 py-2.5 font-util text-sm tabular-nums text-ink outline-none"
                 />
               </label>
               <label className="min-w-32 flex-1">
@@ -289,14 +309,15 @@ export default function GenerationWorkspace() {
                   value={moreElo}
                   placeholder={String(session.target_elo)}
                   onChange={(e) => setMoreElo(e.target.value)}
-                  className="well w-full px-3 py-2.5 font-util text-sm tabular-nums text-ink"
+                  className="well w-full px-3 py-2.5 font-util text-sm tabular-nums text-ink outline-none"
                 />
               </label>
               <button
                 onClick={onGenerateMore}
                 disabled={generatingMore}
-                className="btn btn-solid px-5 py-2.5"
+                className="btn btn-solid flex items-center gap-2 px-5 py-2.5"
               >
+                <Sparkles aria-hidden size={14} strokeWidth={1.75} />
                 {generatingMore ? 'Generating…' : 'Generate more'}
               </button>
             </div>
@@ -326,7 +347,7 @@ export default function GenerationWorkspace() {
 
                       {/* Questions this turn wrote, under the turn that wrote them. */}
                       {items.length > 0 && (
-                        <div className="mt-5 space-y-8 border-l-2 border-rule pl-4">
+                        <div className="mt-5 space-y-6 border-l-2 border-rule pl-4">
                           <p className="eyebrow">
                             {items.length} question{items.length > 1 ? 's' : ''} from this reply
                           </p>
@@ -348,7 +369,7 @@ export default function GenerationWorkspace() {
                 {chatting && (
                   <div className="border-l-2 border-rule pl-4">
                     <p className="eyebrow">AdaptIQ</p>
-                    <p className="mt-1.5 text-[15px] text-muted">Reading the notes…</p>
+                    <Skeleton className="mt-2 h-4 w-48" />
                   </div>
                 )}
               </div>
@@ -359,7 +380,7 @@ export default function GenerationWorkspace() {
                 onChange={(e) => setChatInput(e.target.value)}
                 placeholder="Ask about the notes…"
                 aria-label="Ask about the notes"
-                className="well flex-1 px-3 py-2.5 text-[15px] text-ink"
+                className="well flex-1 px-3.5 py-2.5 text-[15px] text-ink outline-none"
               />
               <button
                 type="submit"
@@ -377,7 +398,8 @@ export default function GenerationWorkspace() {
         </>
       )}
       {finished && (
-        <p className="mt-8 border-l-2 border-easy pl-4 font-util text-xs uppercase tracking-[0.1em] text-easy">
+        <p className="mt-8 flex items-center gap-2 rounded-full border border-easy/30 bg-easy/10 px-4 py-2.5 font-util text-xs uppercase tracking-[0.1em] text-easy">
+          <CheckCircle2 aria-hidden size={14} strokeWidth={1.75} />
           Saved. Taking you back to the topic list…
         </p>
       )}
@@ -402,16 +424,16 @@ function CandidateCard({
 }) {
   const c = reviewed.candidate
   return (
-    <article>
+    <article className="pane px-5 py-5 sm:px-6">
       <div className="flex items-baseline justify-between gap-4">
         <span className="font-util text-xs font-semibold tabular-nums text-muted">
           {String(number).padStart(2, '0')}
         </span>
-        <span className="font-util text-[11px] uppercase tracking-[0.1em] tabular-nums text-muted">
+        <span className="rounded-full border border-rule px-2.5 py-1 font-util text-[10px] uppercase tracking-[0.1em] tabular-nums text-muted">
           Elo {c.elo_question}
         </span>
       </div>
-      <p className="mt-2 text-[17px] leading-relaxed text-ink">{c.question_text}</p>
+      <p className="mt-2 font-read text-[17px] leading-relaxed text-ink">{c.question_text}</p>
 
       <ul className="mt-4 space-y-1.5">
         {LETTERS.map((letter) => {
@@ -420,7 +442,7 @@ function CandidateCard({
             <li
               key={letter}
               className={`flex items-baseline gap-3 rounded-md border-l-2 px-3 py-2 text-[15px] ${
-                isCorrect ? 'border-easy bg-easy/5 text-ink' : 'border-rule text-muted'
+                isCorrect ? 'border-easy bg-easy/10 text-ink' : 'border-rule text-muted'
               }`}
             >
               <span className="font-util text-xs font-semibold">{letter}</span>
@@ -435,26 +457,36 @@ function CandidateCard({
 
       <div className="mt-5 border-l-2 border-signal pl-4">
         <p className="eyebrow">Why</p>
-        <p className="mt-1.5 text-[15px] leading-relaxed text-muted">{c.explanation}</p>
+        <p className="mt-1.5 font-read text-[15px] leading-relaxed text-muted">{c.explanation}</p>
       </div>
 
       <div className="mt-5 flex items-center gap-3">
-        {status === 'published' && <span className="eyebrow text-easy">Published</span>}
-        {status === 'duplicate' && <span className="eyebrow text-medium">Already in the bank</span>}
+        {status === 'published' && (
+          <span className="flex items-center gap-1.5 rounded-full border border-easy/30 bg-easy/10 px-3 py-1.5 font-util text-[10px] uppercase tracking-[0.14em] text-easy">
+            <CheckCircle2 aria-hidden size={12} strokeWidth={1.75} /> Published
+          </span>
+        )}
+        {status === 'duplicate' && (
+          <span className="rounded-full border border-medium/30 bg-medium/10 px-3 py-1.5 font-util text-[10px] uppercase tracking-[0.14em] text-medium">
+            Already in the bank
+          </span>
+        )}
         {(status === 'pending' || status === 'accepting') && (
           <>
             <button
               onClick={() => onAccept(reviewed)}
               disabled={status === 'accepting'}
-              className="btn btn-solid px-4 py-2"
+              className="btn btn-solid flex items-center gap-1.5 px-4 py-2"
             >
+              <Check aria-hidden size={13} strokeWidth={2} />
               {status === 'accepting' ? 'Publishing…' : 'Accept'}
             </button>
             <button
               onClick={() => onReject(reviewed)}
               disabled={status === 'accepting'}
-              className="btn btn-quiet px-4 py-2"
+              className="btn btn-quiet flex items-center gap-1.5 px-4 py-2"
             >
+              <X aria-hidden size={13} strokeWidth={2} />
               Reject
             </button>
           </>
